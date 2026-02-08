@@ -1,0 +1,16 @@
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/config/WebSocketConfig.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/NodeMemoryViewModel.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/K3sDemoApplication.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/handler/TerminalWebSocketHandler.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/StoreController.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/AiToolsController.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/MemoryController.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/VolumeViewModel.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/NodeDiskViewModel.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/service/QwenService.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/PodController.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/DashboardController.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/PodViewModel.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/PodMemoryViewModel.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/MemoryOverviewViewModel.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/StorageOverviewViewModel.java

@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html class="light" lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>AI 智能工具箱 - 灵犀平台</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap"
+        rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+        rel="stylesheet" />
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2b9dee",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101a22",
+                        "ai-purple": "#8b5cf6",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "system-ui", "-apple-system", "sans-serif"],
+                    }
+                },
+            },
+        }
+    </script>
+    <style type="text/tailwindcss">
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+            vertical-align: middle;
+        }
+        body { font-family: 'Inter', "Microsoft YaHei", sans-serif; }
+        .chat-bubble { max-width: 80%; }
+        .chat-bubble.user { background-color: #2b9dee; color: white; border-radius: 12px 12px 0 12px; }
+        .chat-bubble.ai { background-color: #f1f5f9; color: #334155; border-radius: 12px 12px 12px 0; }
+        .dark .chat-bubble.ai { background-color: #1e293b; color: #cbd5e1; }
+        
+        /* Markdown Styles - 统一所有页面的 Markdown 样式 */
+        .markdown-body {
+            line-height: 1.6;
+            color: inherit;
+        }
+        .markdown-body h1,
+        .markdown-body h2,
+        .markdown-body h3,
+        .markdown-body h4 {
+            font-weight: 600;
+            margin-top: 1.5em;
+            margin-bottom: 0.75em;
+            line-height: 1.25;
+        }
+        .markdown-body h1 { font-size: 1.5em; }
+        .markdown-body h2 { font-size: 1.25em; }
+        .markdown-body h3 { font-size: 1.1em; }
+        .markdown-body h4 { font-size: 1em; }
+        .markdown-body p {
+            margin-bottom: 1em;
+        }
+        .markdown-body ul,
+        .markdown-body ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+        .markdown-body ul { list-style: disc; }
+        .markdown-body ol { list-style: decimal; }
+        .markdown-body li {
+            margin: 0.25em 0;
+        }
+        .markdown-body code {
+            background-color: rgba(0, 0, 0, 0.1);
+            padding: 0.2em 0.4em;
+            border-radius: 0.25rem;
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .dark .markdown-body code {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .markdown-body pre {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 1em;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+        .dark .markdown-body pre {
+            background-color: rgba(0, 0, 0, 0.3);
+        }
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .markdown-body blockquote {
+            border-left: 4px solid #8b5cf6;
+            padding-left: 1em;
+            margin: 1em 0;
+            color: #6b7280;
+        }
+        .dark .markdown-body blockquote {
+            color: #9ca3af;
+        }
+        .markdown-body strong {
+            font-weight: 600;
+        }
+        .markdown-body em {
+            font-style: italic;
+        }
+        .markdown-body a {
+            color: #2b9dee;
+            text-decoration: underline;
+        }
+        .markdown-body a:hover {
+            color: #1e7cd6;
+        }
+        .markdown-body table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+        .markdown-body table th,
+        .markdown-body table td {
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            padding: 0.5em;
+            text-align: left;
+        }
+        .dark .markdown-body table th,
+        .dark .markdown-body table td {
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        .markdown-body table th {
+            background-color: rgba(0, 0, 0, 0.05);
+            font-weight: 600;
+        }
+        .dark .markdown-body table th {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        
+        .thinking { animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    </style>
+    <script src="https://unpkg.com/marked@4.3.0/marked.min.js"></script>
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+
+<body
+    class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased min-h-screen flex flex-col">
+    <header
+        class="sticky top-0 z-50 w-full bg-white dark:bg-background-dark border-b border-slate-200 dark:border-slate-800">
+        <div class="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <div class="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+                        <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 2.18l8 4v8.82c0 4.54-3.07 8.83-7.09 9.95C8.07 19.83 5 15.54 5 11V8.18l7-3.5z"/>
+                        <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                    </svg>
+                </div>
+                <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">灵犀平台</h1>
+            </div>
+            <nav class="hidden md:flex items-center gap-8">
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/dashboard">集群概览</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/">Pod 列表</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/store">存储卷</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/memory">内存管理</a>
+                <a class="text-sm font-bold text-ai-purple border-b-2 border-ai-purple py-5" href="/aitools">AI
+                    工具箱</a>
+            </nav>
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-full bg-slate-200 overflow-hidden ml-2">
+                        <img alt="User Profile" class="w-full h-full object-cover"
+                            src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJq5blQRMAftLWJpTxiZJprJqmgSCdQxYsQawbg-Ddra9iSfhhc0xJoqeKEZ0_gGhOjTD0BCT1DdnpQq7GhafGMIZ5w9L-3ohr_VMngtbViq1IWo80OJlYKJnTeAJsnrR3DSHe6P2GBmZLyvRldN2J4VugN4esw21fL6mb85QbhWdGz3fZDO-XB9OJfABjLTI1GUlyih5T43BSdUi3XkRzGM0ZNKqZcFrbM9WQx6teonyPrMqzlJXwyhtQjO8zs_cwi8x-emLwJoy7" />
+                    </div>
+                </div>
+        </div>
+    </header>
+
+    <main class="max-w-[1440px] mx-auto p-6 flex-1 flex gap-6 h-[calc(100vh-64px)]">
+        <!-- Sidebar -->
+        <div class="w-64 flex-shrink-0 flex flex-col gap-4">
+            <div
+                class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
+                <h3 class="text-sm font-bold text-slate-500 uppercase tracking-wider mb-4">快捷指令</h3>
+                <div class="space-y-2">
+                    <button onclick="setPrompt('分析当前集群的健康状态，给出优化建议')"
+                        class="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-2">
+                        <span class="material-symbols-outlined text-ai-purple text-lg">health_and_safety</span>
+                        健康检查
+                    </button>
+                    <button onclick="setPrompt('如何为 Deployment 设置合理的资源限制 (requests/limits)？')"
+                        class="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-2">
+                        <span class="material-symbols-outlined text-blue-500 text-lg">tune</span>
+                        资源优化
+                    </button>
+                    <button onclick="setPrompt('解释 Kubernetes 中 Service 和 Ingress 的区别')"
+                        class="w-full text-left px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors flex items-center gap-2">
+                        <span class="material-symbols-outlined text-emerald-500 text-lg">school</span>
+                        知识问答
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-gradient-to-br from-ai-purple to-purple-600 rounded-xl p-4 text-white shadow-lg">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="material-symbols-outlined">auto_awesome</span>
+                    <span class="font-bold">Powered by Qwen</span>
+                </div>
+                <p class="text-xs opacity-90">基于阿里通义千问大模型，为您提供专业的 K8s 运维支持。</p>
+            </div>
+        </div>
+
+        <!-- Chat Area -->
+        <div
+            class="flex-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col overflow-hidden">
+            <div
+                class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
+                <h2 class="font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-ai-purple animate-pulse"></span>
+                    AI 助手对话
+                </h2>
+                <button onclick="clearChat()"
+                    class="text-xs text-slate-500 hover:text-red-500 flex items-center gap-1 transition-colors">
+                    <span class="material-symbols-outlined text-sm">delete</span> 清空记录
+                </button>
+            </div>
+
+            <div id="chat-history"
+                class="flex-1 p-6 overflow-y-auto space-y-6 custom-scrollbar bg-slate-50 dark:bg-[#0d1117]">
+                <div class="flex flex-col gap-2 items-start">
+                    <div class="chat-bubble ai p-4 shadow-sm">
+                        <p class="text-sm">你好！我是您的灵犀智能助手。请问有什么可以帮您？我可以协助排查故障、解释概念或提供运维建议。</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                <div class="relative">
+                    <textarea id="prompt-input" rows="3"
+                        class="w-full bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 rounded-xl text-sm p-4 pr-12 focus:ring-2 focus:ring-ai-purple focus:border-transparent resize-none"
+                        placeholder="在此输入您的问题..."
+                        onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendMessage(); }"></textarea>
+                    <button onclick="sendMessage()"
+                        class="absolute right-3 bottom-3 p-2 bg-ai-purple text-white rounded-lg hover:bg-purple-600 transition-colors shadow-md">
+                        <span class="material-symbols-outlined text-xl">send</span>
+                    </button>
+                </div>
+                <div class="text-center mt-2">
+                    <span class="text-[10px] text-slate-400">AI 生成内容仅供参考，请结合实际情况操作。</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        function setPrompt(text) {
+            document.getElementById('prompt-input').value = text;
+            document.getElementById('prompt-input').focus();
+        }
+
+        function clearChat() {
+            const history = document.getElementById('chat-history');
+            history.innerHTML = `
+            <div class="flex flex-col gap-2 items-start">
+                 <div class="chat-bubble ai p-4 shadow-sm">
+                    <p class="text-sm">对话已重置。我是您的灵犀智能助手，请问有什么可以帮您？</p>
+                </div>
+            </div>
+        `;
+        }
+
+        function appendMessage(role, text) {
+            const history = document.getElementById('chat-history');
+            const bubble = document.createElement('div');
+            bubble.className = `flex flex-col gap-2 ${role === 'user' ? 'items-end' : 'items-start'}`;
+
+            const content = document.createElement('div');
+            content.className = `chat-bubble ${role} p-4 shadow-sm text-sm whitespace-pre-wrap leading-relaxed`;
+            content.innerText = text; // Secure text insertion
+
+            bubble.appendChild(content);
+            history.appendChild(bubble);
+            history.scrollTop = history.scrollHeight;
+            return content;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('prompt-input');
+            const prompt = input.value.trim();
+            if (!prompt) return;
+
+            input.value = '';
+            appendMessage('user', prompt);
+
+            // Add thinking indicator
+            const thinkingDiv = document.createElement('div');
+            thinkingDiv.id = 'thinking-indicator';
+            thinkingDiv.className = 'flex flex-col gap-2 items-start';
+            thinkingDiv.innerHTML = `
+                <div class="chat-bubble ai p-4 shadow-sm flex items-center gap-2 text-slate-400">
+                    <span class="material-symbols-outlined text-lg thinking">smart_toy</span>
+                    <span class="text-xs">正在思考...</span>
+                </div>
+            `;
+            const history = document.getElementById('chat-history');
+            history.appendChild(thinkingDiv);
+            history.scrollTop = history.scrollHeight;
+
+            try {
+                const response = await fetch('/aitools/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // Remove thinking indicator and create a new message bubble for the stream
+                thinkingDiv.remove();
+
+                // Create the AI message bubble
+                const bubble = document.createElement('div');
+                bubble.className = "flex flex-col gap-2 items-start";
+                const content = document.createElement('div');
+                content.className = "chat-bubble ai p-4 shadow-sm text-sm whitespace-pre-wrap leading-relaxed";
+                bubble.appendChild(content);
+                history.appendChild(bubble);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullText = '';
+
+                // Configure marked for highlighting
+                // Configure marked for highlighting and line breaks
+                if (typeof marked !== 'undefined') {
+                    marked.setOptions({
+                        breaks: true, // Enable soft line breaks
+                        highlight: function (code, lang) {
+                            const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                            return hljs.highlight(code, { language }).value;
+                        },
+                        langPrefix: 'hljs language-'
+                    });
+                }
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data:')) {
+                            const data = line.substring(5); // Remove 'data:'
+                            if (data.length === 0) continue;
+
+                            fullText += data;
+
+                            // Pre-process to ensure newlines before headers and HRs if missing
+                            // Replace "text---" with "text\n\n---\n\n"
+                            let formattedText = fullText.replace(/([^\n])\s*(---)/g, '$1\n\n$2\n\n');
+                            // Replace "text###" with "text\n\n###"
+                            formattedText = formattedText.replace(/([^\n])\s*(#{1,6}\s)/g, '$1\n\n$2');
+
+                            // Parse markdown and update
+                            if (typeof marked !== 'undefined') {
+                                content.innerHTML = '<div class="markdown-body">' + marked.parse(formattedText) + '</div>';
+                            } else {
+                                content.innerText = formattedText;
+                            }
+                            history.scrollTop = history.scrollHeight;
+                        }
+                    }
+                }
+
+            } catch (error) {
+                const indicator = document.getElementById('thinking-indicator');
+                if (indicator) indicator.remove();
+                appendMessage('ai', 'Error: Could not connect to AI service. ' + error);
+            }
+        }
+    </script>
+</body>
+
+</html>

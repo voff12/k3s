@@ -1,0 +1,118 @@
+---
+# ServiceAccount - Optional: Create a dedicated service account
+# If you want to use a dedicated service account instead of default
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k3s-demo-sa
+  namespace: default
+---
+# ClusterRole - Grants cluster-wide read permissions and namespace-specific write permissions
+# This is needed because DashboardController and StoreController access cluster-scoped resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k3s-demo-clusterrole
+rules:
+  # Cluster-scoped resources (read-only for dashboard/storage views)
+  - apiGroups: [""]
+    resources: ["nodes", "persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  # Namespace-scoped resources (read across all namespaces)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+# Role - Grants write permissions in the default namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k3s-demo-role
+  namespace: default
+rules:
+  # Pod permissions
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Pod exec subresource - Required for terminal/exec functionality
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create", "get"]
+  # Deployment permissions
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Deployment scale subresource - This is the key permission needed for scaling
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
+  # ReplicaSet permissions (needed for getDeploymentName method)
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+# ClusterRoleBinding - Binds the default service account to the ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k3s-demo-clusterrolebinding
+subjects:
+  # Using the default service account
+  - kind: ServiceAccount
+    name: default
+    namespace: default
+roleRef:
+  kind: ClusterRole
+  name: k3s-demo-clusterrole
+  apiGroup: rbac.authorization.k8s.io
+---
+# RoleBinding - Binds the default service account to the Role (for write operations in default namespace)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k3s-demo-rolebinding
+  namespace: default
+subjects:
+  # Using the default service account
+  - kind: ServiceAccount
+    name: default
+    namespace: default
+roleRef:
+  kind: Role
+  name: k3s-demo-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Alternative bindings for dedicated service account (commented out)
+# Uncomment if you want to use k3s-demo-sa instead of default
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: ClusterRoleBinding
+# metadata:
+#   name: k3s-demo-clusterrolebinding-sa
+# subjects:
+#   - kind: ServiceAccount
+#     name: k3s-demo-sa
+#     namespace: default
+# roleRef:
+#   kind: ClusterRole
+#   name: k3s-demo-clusterrole
+#   apiGroup: rbac.authorization.k8s.io
+# ---
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: RoleBinding
+# metadata:
+#   name: k3s-demo-rolebinding-sa
+#   namespace: default
+# subjects:
+#   - kind: ServiceAccount
+#     name: k3s-demo-sa
+#     namespace: default
+# roleRef:
+#   kind: Role
+#   name: k3s-demo-role
+#   apiGroup: rbac.authorization.k8s.io

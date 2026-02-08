@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html class="light" lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>内存资源管理 - 灵犀平台</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Marked.js for Markdown rendering -->
+<script src="https://unpkg.com/marked@4.3.0/marked.min.js"></script>
+<!-- Highlight.js for code syntax highlighting -->
+<link rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2b9dee",
+                        "ai-purple": "#8b5cf6",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101a22",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+                },
+            },
+        }
+    </script>
+<style type="text/tailwindcss">
+        body { font-family: 'Inter', sans-serif; }
+        .material-symbols-outlined { font-size: 24px; vertical-align: middle; }
+        .bar-chart-container { 
+            min-height: 220px;
+            height: auto;
+            display: flex; 
+            align-items: flex-end; 
+            justify-content: center;
+            gap: 2rem; 
+            padding: 30px 20px 50px 20px;
+            position: relative;
+        }
+        .bar-item-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            position: relative;
+        }
+        .bar-item { 
+            width: 50px; 
+            min-height: 30px;
+            border-radius: 4px 4px 0 0; 
+            transition: height 0.3s ease; 
+            position: relative;
+            background: linear-gradient(to top, #2b9dee, #5bb3f0);
+            box-shadow: 0 2px 4px rgba(43, 157, 238, 0.2);
+        }
+        .bar-value {
+            position: absolute; 
+            top: -22px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            white-space: nowrap; 
+            font-size: 11px;
+            font-weight: bold;
+            color: #374151;
+            z-index: 10;
+        }
+        .dark .bar-value {
+            color: #e5e7eb;
+        }
+        .bar-label { 
+            position: absolute; 
+            bottom: -26px; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            white-space: nowrap; 
+            font-size: 11px;
+            color: #6b7280;
+            font-weight: 500;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .dark .bar-label {
+            color: #9ca3af;
+        }
+        
+        /* Markdown Styles */
+        .markdown-body {
+            line-height: 1.6;
+            color: inherit;
+        }
+        .markdown-body h1,
+        .markdown-body h2,
+        .markdown-body h3,
+        .markdown-body h4 {
+            font-weight: 600;
+            margin-top: 1.5em;
+            margin-bottom: 0.75em;
+            line-height: 1.25;
+        }
+        .markdown-body h1 { font-size: 1.5em; }
+        .markdown-body h2 { font-size: 1.25em; }
+        .markdown-body h3 { font-size: 1.1em; }
+        .markdown-body h4 { font-size: 1em; }
+        .markdown-body p {
+            margin-bottom: 1em;
+        }
+        .markdown-body ul,
+        .markdown-body ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+        .markdown-body li {
+            margin: 0.25em 0;
+        }
+        .markdown-body code {
+            background-color: rgba(0, 0, 0, 0.1);
+            padding: 0.2em 0.4em;
+            border-radius: 0.25rem;
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .dark .markdown-body code {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        .markdown-body pre {
+            background-color: rgba(0, 0, 0, 0.05);
+            padding: 1em;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin: 1em 0;
+        }
+        .dark .markdown-body pre {
+            background-color: rgba(0, 0, 0, 0.3);
+        }
+        .markdown-body pre code {
+            background-color: transparent;
+            padding: 0;
+        }
+        .markdown-body blockquote {
+            border-left: 4px solid #8b5cf6;
+            padding-left: 1em;
+            margin: 1em 0;
+            color: #6b7280;
+        }
+        .dark .markdown-body blockquote {
+            color: #9ca3af;
+        }
+        .markdown-body strong {
+            font-weight: 600;
+        }
+        .markdown-body em {
+            font-style: italic;
+        }
+        .markdown-body a {
+            color: #2b9dee;
+            text-decoration: underline;
+        }
+        .markdown-body a:hover {
+            color: #1e7cd6;
+        }
+        .markdown-body table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 1em 0;
+        }
+        .markdown-body table th,
+        .markdown-body table td {
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            padding: 0.5em;
+            text-align: left;
+        }
+        .dark .markdown-body table th,
+        .dark .markdown-body table td {
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        .markdown-body table th {
+            background-color: rgba(0, 0, 0, 0.05);
+            font-weight: 600;
+        }
+        .dark .markdown-body table th {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-[#111518] dark:text-gray-100 font-display transition-colors duration-200">
+
+<!-- AI 智能扩容建议弹窗 -->
+<div id="aiSuggestionModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+<div class="bg-white dark:bg-[#1a262f] w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden border border-gray-200 dark:border-gray-800">
+<div class="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-ai-purple/5">
+<div class="flex items-center gap-3">
+<div class="size-10 bg-ai-purple rounded-xl flex items-center justify-center text-white shadow-lg shadow-ai-purple/20">
+<span class="material-symbols-outlined">psychology</span>
+</div>
+<div>
+<h2 class="text-lg font-bold text-gray-900 dark:text-white">AI 智能建议</h2>
+<p class="text-xs text-ai-purple font-medium">基于 Qwen 大模型的智能分析</p>
+</div>
+</div>
+<button onclick="closeAISuggestionModal()" class="p-2 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<div class="p-6 space-y-6">
+<div class="space-y-2">
+<div class="flex items-center gap-2 text-red-600">
+<span class="material-symbols-outlined text-[20px]">report_problem</span>
+<h3 class="text-sm font-bold">问题诊断</h3>
+</div>
+<div class="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/20 p-4 rounded-xl">
+<p class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed" id="problem-diagnosis">
+检测到核心组件 <span class="font-bold text-red-700 dark:text-red-400" id="problem-pod"></span> 的内存使用率已达到 <span class="font-bold" id="problem-percent"></span>。当前内存限制已接近临界点，存在极高的 OOM (内存溢出) 风险，可能影响系统响应速度。
+</p>
+<div class="text-xs text-gray-600 dark:text-gray-400 mt-2 markdown-body" id="problem-reason"></div>
+</div>
+</div>
+<div class="space-y-2">
+<div class="flex items-center gap-2 text-ai-purple">
+<span class="material-symbols-outlined text-[20px]">lightbulb</span>
+<h3 class="text-sm font-bold">推荐方案</h3>
+</div>
+<div class="bg-ai-purple/5 border border-ai-purple/10 p-4 rounded-xl flex items-center justify-between">
+<div class="text-center flex-1">
+<p class="text-[10px] text-gray-500 uppercase">当前限制</p>
+<p class="text-lg font-bold text-gray-400 line-through" id="current-limit">4.0 Gi</p>
+</div>
+<div class="px-4">
+<span class="material-symbols-outlined text-ai-purple">trending_flat</span>
+</div>
+<div class="text-center flex-1">
+<p class="text-[10px] text-ai-purple font-bold uppercase">建议调整至</p>
+<p class="text-2xl font-bold text-ai-purple" id="suggested-limit">6.0 Gi</p>
+</div>
+</div>
+</div>
+<div class="space-y-2">
+<div class="flex items-center gap-2 text-green-600">
+<span class="material-symbols-outlined text-[20px]">verified</span>
+<h3 class="text-sm font-bold">预期收益</h3>
+</div>
+<div class="bg-green-50 dark:bg-green-900/10 border border-green-100 dark:border-green-900/20 p-4 rounded-xl">
+<div class="text-sm text-gray-700 dark:text-gray-300 leading-relaxed markdown-body" id="benefits-text">提升系统稳定性和性能，降低 OOM 风险</div>
+</div>
+</div>
+</div>
+<div class="p-6 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800 flex gap-3">
+<button onclick="rejectSuggestion()" class="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+拒绝建议
+</button>
+<button id="apply-suggestion-btn" onclick="applySuggestion()" class="flex-[2] bg-ai-purple hover:bg-ai-purple/90 text-white font-bold py-2.5 rounded-xl shadow-lg shadow-ai-purple/20 transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[20px]">bolt</span>
+一键应用
+</button>
+</div>
+</div>
+</div>
+
+<div class="flex h-screen overflow-hidden">
+<aside class="w-64 bg-white dark:bg-[#1a262f] border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0">
+<div class="p-6 flex items-center gap-3">
+<div class="size-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+<path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 2.18l8 4v8.82c0 4.54-3.07 8.83-7.09 9.95C8.07 19.83 5 15.54 5 11V8.18l7-3.5z"/>
+<path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+</svg>
+</div>
+<div>
+<h1 class="text-base font-bold leading-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">灵犀平台</h1>
+<p class="text-xs text-gray-500 dark:text-gray-400">智能云管理平台</p>
+</div>
+</div>
+<nav class="flex-1 px-3 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg" href="/dashboard">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-sm font-medium">概览</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg" href="/">
+<span class="material-symbols-outlined">dns</span>
+<span class="text-sm font-medium">Pod 列表</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg" href="/">
+<span class="material-symbols-outlined">layers</span>
+<span class="text-sm font-medium">工作负载</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 bg-primary/10 text-primary rounded-lg" href="/memory">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1">memory</span>
+<span class="text-sm font-medium">内存管理</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg" href="/store">
+<span class="material-symbols-outlined">database</span>
+<span class="text-sm font-medium">存储管理</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg" href="/aitools">
+<span class="material-symbols-outlined">smart_toy</span>
+<span class="text-sm font-medium">AI 工具箱</span>
+</a>
+</nav>
+<div class="p-4 border-t border-gray-200 dark:border-gray-800">
+<div class="flex items-center gap-3 px-2">
+<div class="size-8 rounded-full bg-gray-200 dark:bg-gray-700 bg-cover bg-center" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuDMSTbQOgrz7t58cTCaIoL8OGYHVwDYX--qsmt2kWblpkzIeEVIk_YDB1h-TKVpWaEf3UBoII1tiMTX5lGYxhL7E-HEoqXFgS0-1DTGccWPbQSGaAOwQOqpObAoRvoqpH5DKWSJooHdnu6Xqjp7GuyPvDjxCrZi8zHHZDKQuOMBkwcqUpUKz88HxEC0vqeQAruaWkrQSxwLDKq5K1Ryz45mpPPrZUTwOX_GWMR_LywB6FAlu14_S3jE1Ronjzfz4mF1OlTE9S9m5u4S')"></div>
+<div class="flex-1 min-w-0">
+<p class="text-xs font-medium truncate">管理员</p>
+<p class="text-[10px] text-gray-500 dark:text-gray-400 truncate">admin@hospital.local</p>
+</div>
+</div>
+</div>
+</aside>
+<main class="flex-1 flex flex-col overflow-hidden">
+<header class="h-16 bg-white dark:bg-[#1a262f] border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-8 shrink-0">
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-primary">memory</span>
+<h2 class="text-lg font-bold">内存资源管理</h2>
+</div>
+<div th:if="${error}" class="flex-1 ml-4">
+<div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 px-4 py-2 rounded-lg text-sm">
+<span class="material-symbols-outlined text-sm align-middle">error</span>
+<span th:text="${error}">错误信息</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button onclick="clearCache()" class="flex items-center gap-2 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-700 dark:text-gray-300 px-4 py-2 rounded-lg text-sm font-medium transition-all">
+<span class="material-symbols-outlined text-[20px]">delete_sweep</span>
+清理缓存
+</button>
+<button onclick="showAISuggestions()" class="flex items-center gap-2 bg-ai-purple hover:bg-ai-purple/90 text-white px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm">
+<span class="material-symbols-outlined text-[20px]">psychology</span>
+智能扩容建议
+</button>
+<div class="h-6 w-px bg-gray-200 dark:bg-gray-800 mx-2"></div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+</div>
+</div>
+</header>
+<div class="flex-1 overflow-y-auto p-8 space-y-8">
+<!-- 错误提示 -->
+<div th:if="${error}" class="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+<p class="text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">error</span>
+<span th:text="${error}">数据加载错误</span>
+</p>
+</div>
+<section>
+<h3 class="text-base font-bold mb-4 flex items-center gap-2">
+<span class="w-1.5 h-4 bg-primary rounded-full"></span>
+内存概览
+</h3>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="bg-white dark:bg-[#1a262f] p-6 rounded-xl border border-gray-200 dark:border-gray-800 relative overflow-hidden">
+<div class="flex justify-between items-start mb-4">
+<div>
+<p class="text-sm text-gray-500 dark:text-gray-400 font-medium">总物理内存</p>
+<h4 class="text-3xl font-bold mt-1" th:text="${overview != null ? overview.totalMemory : '0 B'}">256 GB</h4>
+</div>
+<div class="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+<span class="material-symbols-outlined text-primary">memory</span>
+</div>
+</div>
+<div class="h-10 w-full flex items-end gap-1" id="memory-history-chart">
+<canvas id="memoryHistoryChart"></canvas>
+</div>
+</div>
+<div class="bg-white dark:bg-[#1a262f] p-6 rounded-xl border border-gray-200 dark:border-gray-800 relative overflow-hidden">
+<div class="flex justify-between items-start mb-4">
+<div>
+<p class="text-sm text-gray-500 dark:text-gray-400 font-medium">已分配内存</p>
+<h4 class="text-3xl font-bold mt-1" th:text="${overview != null ? overview.allocatedMemory : '0 B'}">180 GB</h4>
+</div>
+<div class="p-2 bg-green-50 dark:bg-green-900/20 rounded-lg">
+<span class="material-symbols-outlined text-green-600">assignment_turned_in</span>
+</div>
+</div>
+<div class="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-full mt-2">
+<div class="bg-primary h-full rounded-full" th:style="'width: ' + ${overview != null ? overview.utilization : '0'} + '%'"></div>
+</div>
+<p class="text-xs text-gray-400 mt-2" th:text="'已分配 ' + ${overview != null ? overview.utilization : '0'} + '% 内存资源'">已分配 70.3% 内存资源</p>
+</div>
+<div class="bg-white dark:bg-[#1a262f] p-6 rounded-xl border border-gray-200 dark:border-gray-800">
+<div class="flex justify-between items-start mb-4">
+<div>
+<p class="text-sm text-gray-500 dark:text-gray-400 font-medium">内存利用率</p>
+<h4 class="text-3xl font-bold mt-1" th:text="${overview != null ? (overview.utilization + ' %') : '0 %'}">72.5 %</h4>
+</div>
+<div class="p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+<span class="material-symbols-outlined text-yellow-600">bolt</span>
+</div>
+</div>
+<div class="flex items-center gap-2 text-xs text-green-600 font-medium">
+<span class="material-symbols-outlined text-sm">trending_down</span>
+比昨日下降 2.1%
+</div>
+</div>
+</div>
+</section>
+<section>
+<h3 class="text-base font-bold mb-4 flex items-center gap-2">
+<span class="w-1.5 h-4 bg-primary rounded-full"></span>
+节点内存分布
+</h3>
+<div class="bg-white dark:bg-[#1a262f] p-8 rounded-xl border border-gray-200 dark:border-gray-800">
+<!-- 调试信息（开发时可见） -->
+<div th:if="${error}" class="mb-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+<p class="text-sm text-yellow-800 dark:text-yellow-300">
+<span class="material-symbols-outlined text-sm align-middle">warning</span>
+<span th:text="'数据加载错误: ' + ${error}">错误信息</span>
+</p>
+</div>
+<div class="bar-chart-container mb-8" th:if="${nodeMemories != null && !nodeMemories.isEmpty()}">
+<div th:each="node : ${nodeMemories}" class="bar-item-wrapper">
+<div class="bar-item" th:style="'height: ' + ${#numbers.formatDecimal(node.displayUtilization, 1, 1)} + '%'">
+<div class="bar-value" th:text="${#numbers.formatDecimal(node.utilization, 1, 1) + '%'}" th:title="${node.utilization < 1.0 ? '实际利用率: ' + #numbers.formatDecimal(node.utilization, 2, 2) + '% (已放大显示)' : '利用率: ' + #numbers.formatDecimal(node.utilization, 1, 1) + '%'}">65%</div>
+</div>
+<span class="bar-label" th:text="${node.nodeName}" th:title="${node.nodeName + ' - 总内存: ' + node.totalMemory + ', 已分配: ' + node.allocatedMemory}">Master</span>
+</div>
+</div>
+<div class="text-center py-12 text-gray-400" th:if="${nodeMemories == null || nodeMemories.isEmpty()}">
+<span class="material-symbols-outlined text-4xl mb-2">memory</span>
+<p class="text-sm">暂无节点数据</p>
+<p class="text-xs text-gray-500 mt-2" th:if="${error == null}">请检查 Kubernetes 集群连接</p>
+</div>
+<div class="pt-6 border-t border-gray-100 dark:border-gray-800 grid grid-cols-2 md:grid-cols-4 gap-4">
+<div class="text-center">
+<p class="text-[10px] text-gray-500 uppercase mb-1">最高负载节点</p>
+<p class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate px-2" th:if="${nodeMemories != null && !nodeMemories.isEmpty()}" th:text="${nodeMemories[0].nodeName}" th:title="${nodeMemories[0].nodeName}">Worker-01</p>
+<p class="text-sm font-bold text-gray-800 dark:text-gray-200" th:unless="${nodeMemories != null && !nodeMemories.isEmpty()}">N/A</p>
+</div>
+<div class="text-center">
+<p class="text-[10px] text-gray-500 uppercase mb-1">平均利用率</p>
+<p class="text-sm font-bold text-gray-800 dark:text-gray-200" th:if="${nodeMemories != null && !nodeMemories.isEmpty()}" th:text="${#numbers.formatDecimal(#aggregates.sum(nodeMemories.![utilization]) / #lists.size(nodeMemories), 1, 1)} + '%'">62.5%</p>
+<p class="text-sm font-bold text-gray-800 dark:text-gray-200" th:unless="${nodeMemories != null && !nodeMemories.isEmpty()}">N/A</p>
+</div>
+<div class="text-center">
+<p class="text-[10px] text-gray-500 uppercase mb-1">节点数量</p>
+<p class="text-sm font-bold text-gray-800 dark:text-gray-200" th:text="${#lists.size(nodeMemories)} + ' 个'">4 个</p>
+</div>
+<div class="text-center">
+<p class="text-[10px] text-gray-500 uppercase mb-1">运行状态</p>
+<p class="text-sm font-bold text-green-600 flex items-center justify-center gap-1">
+<span class="size-2 bg-green-500 rounded-full"></span> 良好
+</p>
+</div>
+</div>
+</div>
+</section>
+<section>
+<div class="flex items-center justify-between mb-4">
+<h3 class="text-base font-bold flex items-center gap-2">
+<span class="w-1.5 h-4 bg-primary rounded-full"></span>
+应用内存排行
+</h3>
+<div class="flex items-center gap-2">
+<span class="text-xs text-gray-500" th:text="'更新时间: ' + ${#dates.format(#dates.createNow(), 'yyyy-MM-dd HH:mm:ss')}">更新时间: 2023-10-27 14:30:00</span>
+<button onclick="location.reload()" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded">
+<span class="material-symbols-outlined text-sm">refresh</span>
+</button>
+</div>
+</div>
+<div class="bg-white dark:bg-[#1a262f] rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+<table class="w-full text-left border-collapse">
+<thead class="bg-background-light dark:bg-background-dark/50 border-b border-gray-200 dark:border-gray-800">
+<tr>
+<th class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Pod 名称</th>
+<th class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">命名空间</th>
+<th class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Request (请求)</th>
+<th class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Limit (限制)</th>
+<th class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">实际使用量</th>
+<th class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">负载状态</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+<tr th:each="pod : ${podMemories}" class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+<td class="px-6 py-4">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary/70">layers</span>
+<span class="text-sm font-medium" th:text="${pod.podName}">his-api-7d5f49-x2k</span>
+</div>
+</td>
+<td class="px-6 py-4 text-xs text-gray-500 font-medium" th:text="${pod.namespace}">prod-his</td>
+<td class="px-6 py-4 text-sm" th:text="${pod.memoryRequest}">4.0 Gi</td>
+<td class="px-6 py-4 text-sm" th:text="${pod.memoryLimit}">8.0 Gi</td>
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="text-sm font-bold text-gray-800 dark:text-gray-200" th:text="${pod.actualUsage}">6.2 Gi</span>
+<div class="w-16 h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden" th:if="${pod.actualUsage != '未设置'}">
+<div th:classappend="${pod.usagePercent > 90} ? 'bg-red-500' : (${pod.usagePercent > 75} ? 'bg-yellow-500' : 'bg-primary')" 
+     th:style="'width: ' + ${pod.usagePercent} + '%'" class="h-full"></div>
+</div>
+<span class="text-xs text-gray-400" th:if="${pod.actualUsage == '未设置'}">(基于 Limit)</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold" th:class="${pod.statusClass}" th:text="${pod.status}">接近限额</span>
+</td>
+</tr>
+<tr th:if="${#lists.isEmpty(podMemories)}">
+<td colspan="6" class="px-6 py-8 text-center text-gray-500">暂无 Pod 数据</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</main>
+</div>
+
+<script>
+let currentSuggestion = null;
+
+function showAISuggestions() {
+    // 显示加载状态
+    const modal = document.getElementById('aiSuggestionModal');
+    modal.classList.remove('hidden');
+    document.getElementById('problem-pod').textContent = '分析中...';
+    document.getElementById('problem-percent').textContent = '--';
+    document.getElementById('current-limit').textContent = '--';
+    document.getElementById('suggested-limit').textContent = '--';
+    document.getElementById('problem-reason').innerHTML = '<div class="flex items-center gap-2"><span class="material-symbols-outlined animate-spin text-sm">sync</span><span>正在调用 AI 大模型分析节点内存分布...</span></div>';
+    document.getElementById('benefits-text').innerHTML = '<div class="flex items-center gap-2"><span class="material-symbols-outlined animate-spin text-sm">sync</span><span>分析中...</span></div>';
+    
+    fetch('/memory/ai-suggestions')
+        .then(response => response.json())
+        .then(data => {
+            if (data.hasSuggestion && data.suggestion) {
+                currentSuggestion = data.suggestion;
+                
+                // 判断是否为通用建议（没有高使用率 Pod 的情况）
+                const isGeneralAdvice = data.suggestion.isGeneralAdvice === true;
+                const recommendationSection = document.querySelector('.space-y-2:nth-of-type(2)');
+                const applyBtn = document.getElementById('apply-suggestion-btn');
+                
+                if (isGeneralAdvice) {
+                    // 通用建议模式：显示集群整体分析
+                    document.getElementById('problem-pod').textContent = '集群整体';
+                    document.getElementById('problem-percent').textContent = '正常';
+                    document.getElementById('current-limit').textContent = 'N/A';
+                    document.getElementById('suggested-limit').textContent = 'N/A';
+                    
+                    // 隐藏推荐方案部分（因为没有具体的扩容建议）
+                    if (recommendationSection) {
+                        recommendationSection.style.display = 'none';
+                    }
+                    
+                    // 隐藏"一键应用"按钮（因为没有具体操作）
+                    if (applyBtn) {
+                        applyBtn.style.display = 'none';
+                    }
+                } else {
+                    // 具体 Pod 建议模式
+                    document.getElementById('problem-pod').textContent = data.suggestion.podName;
+                    document.getElementById('problem-percent').textContent = data.suggestion.usagePercent + '%';
+                    document.getElementById('current-limit').textContent = data.suggestion.currentLimit;
+                    document.getElementById('suggested-limit').textContent = data.suggestion.suggestedLimit;
+                    
+                    // 显示推荐方案部分
+                    if (recommendationSection) {
+                        recommendationSection.style.display = 'block';
+                    }
+                    
+                    // 显示"一键应用"按钮
+                    if (applyBtn) {
+                        applyBtn.style.display = 'flex';
+                    }
+                }
+                
+                // 显示 AI 分析的问题诊断（支持 Markdown）
+                const reasonElement = document.getElementById('problem-reason');
+                if (data.suggestion.reason) {
+                    if (typeof marked !== 'undefined') {
+                        reasonElement.innerHTML = marked.parse(data.suggestion.reason, {
+                            breaks: true,
+                            gfm: true,
+                            headerIds: false,
+                            mangle: false
+                        });
+                        // 高亮代码块
+                        reasonElement.querySelectorAll('pre code').forEach((block) => {
+                            hljs.highlightElement(block);
+                        });
+                    } else {
+                        reasonElement.textContent = data.suggestion.reason;
+                    }
+                } else {
+                    reasonElement.textContent = '内存使用率已连续超过阈值，存在 OOM 风险';
+                }
+                
+                // 显示预期收益（支持 Markdown）
+                const benefitsElement = document.getElementById('benefits-text');
+                if (data.suggestion.benefits) {
+                    if (typeof marked !== 'undefined') {
+                        benefitsElement.innerHTML = marked.parse(data.suggestion.benefits, {
+                            breaks: true,
+                            gfm: true,
+                            headerIds: false,
+                            mangle: false
+                        });
+                        // 高亮代码块
+                        benefitsElement.querySelectorAll('pre code').forEach((block) => {
+                            hljs.highlightElement(block);
+                        });
+                    } else {
+                        benefitsElement.textContent = data.suggestion.benefits;
+                    }
+                } else {
+                    benefitsElement.textContent = '提升系统稳定性和性能，降低 OOM 风险';
+                }
+            } else {
+                // 如果后端返回错误，仍然显示模态框，但显示错误信息
+                document.getElementById('problem-pod').textContent = '错误';
+                document.getElementById('problem-percent').textContent = '--';
+                document.getElementById('current-limit').textContent = '--';
+                document.getElementById('suggested-limit').textContent = '--';
+                document.getElementById('problem-reason').innerHTML = '<p class="text-red-600">' + (data.message || '获取 AI 建议失败，请稍后重试') + '</p>';
+                document.getElementById('benefits-text').innerHTML = '<p class="text-gray-500">无法获取预期收益分析</p>';
+            }
+        })
+        .catch(err => {
+            console.error('获取 AI 建议失败:', err);
+            // 显示错误信息在模态框中，而不是 alert
+            document.getElementById('problem-pod').textContent = '错误';
+            document.getElementById('problem-percent').textContent = '--';
+            document.getElementById('current-limit').textContent = '--';
+            document.getElementById('suggested-limit').textContent = '--';
+            document.getElementById('problem-reason').innerHTML = '<p class="text-red-600">获取 AI 建议失败: ' + err.message + '</p>';
+            document.getElementById('benefits-text').innerHTML = '<p class="text-gray-500">无法获取预期收益分析</p>';
+        });
+}
+
+function closeAISuggestionModal() {
+    document.getElementById('aiSuggestionModal').classList.add('hidden');
+    currentSuggestion = null;
+}
+
+function applySuggestion() {
+    if (!currentSuggestion) {
+        alert('没有可应用的建议');
+        return;
+    }
+    
+    // 如果是通用建议（没有具体 Pod），不允许应用
+    if (currentSuggestion.isGeneralAdvice === true) {
+        alert('当前是集群整体分析建议，没有具体的扩容操作可执行。');
+        return;
+    }
+    
+    if (!currentSuggestion.namespace || !currentSuggestion.podName || !currentSuggestion.suggestedLimit) {
+        alert('建议信息不完整，无法应用');
+        return;
+    }
+    
+    if (!confirm('确定要应用此建议吗？将更新 ' + currentSuggestion.podName + ' 的内存限制为 ' + currentSuggestion.suggestedLimit)) {
+        return;
+    }
+    
+    fetch('/memory/apply-suggestion', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: 'namespace=' + encodeURIComponent(currentSuggestion.namespace) +
+              '&podName=' + encodeURIComponent(currentSuggestion.podName) +
+              '&newLimit=' + encodeURIComponent(currentSuggestion.suggestedLimit)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✓ ' + data.message);
+            closeAISuggestionModal();
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            alert('✗ ' + data.message);
+        }
+    })
+    .catch(err => {
+        console.error('应用建议失败:', err);
+        alert('应用建议失败: ' + err.message);
+    });
+}
+
+function rejectSuggestion() {
+    closeAISuggestionModal();
+}
+
+function clearCache() {
+    if (!confirm('确定要清理缓存吗？')) {
+        return;
+    }
+    
+    fetch('/memory/clear-cache', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('✓ ' + data.message);
+        } else {
+            alert('✗ ' + data.message);
+        }
+    })
+    .catch(err => {
+        console.error('清理缓存失败:', err);
+        alert('清理缓存失败: ' + err.message);
+    });
+}
+
+// 初始化内存利用率历史曲线图
+document.addEventListener('DOMContentLoaded', function() {
+    const utilizationHistory = /*[[${utilizationHistory}]]*/ [];
+    if (utilizationHistory && utilizationHistory.length > 0) {
+        const ctx = document.getElementById('memoryHistoryChart');
+        if (ctx) {
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Array.from({length: utilizationHistory.length}, (_, i) => i + 'h'),
+                    datasets: [{
+                        label: '内存利用率',
+                        data: utilizationHistory,
+                        borderColor: '#2b9dee',
+                        backgroundColor: 'rgba(43, 157, 238, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 0,
+                        pointHoverRadius: 3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: { display: false },
+                            grid: { display: false }
+                        },
+                        x: {
+                            ticks: { display: false },
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+        }
+    }
+});
+</script>
+
+</body></html>

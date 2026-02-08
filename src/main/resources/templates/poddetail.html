@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html class="light" lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Pod 详情与日志管理 - 灵犀平台</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap"
+        rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+        rel="stylesheet" />
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2b9dee",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101a22",
+                        "ai-purple": "#8b5cf6",
+                        "terminal-bg": "#0d1117",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "system-ui", "-apple-system", "sans-serif"],
+                        "mono": ["JetBrains Mono", "Menlo", "Monaco", "Courier New", "monospace"]
+                    },
+                    borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+                },
+            },
+        }
+    </script>
+    <style type="text/tailwindcss">
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+            vertical-align: middle;
+        }
+        body {
+            font-family: 'Inter', "Microsoft YaHei", sans-serif;
+        }
+        .log-line:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #333;
+            border-radius: 4px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+    <!-- Highlight.js for YAML syntax highlighting -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+</head>
+
+<body
+    class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased min-h-screen">
+    <header
+        class="sticky top-0 z-50 w-full bg-white dark:bg-background-dark border-b border-slate-200 dark:border-slate-800">
+        <div class="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <div class="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
+                        <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 2.18l8 4v8.82c0 4.54-3.07 8.83-7.09 9.95C8.07 19.83 5 15.54 5 11V8.18l7-3.5z"/>
+                        <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                    </svg>
+                </div>
+                <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">灵犀平台</h1>
+            </div>
+            <nav class="hidden md:flex items-center gap-8">
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/dashboard">集群概览</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/">Pod 列表</a>
+                <a class="text-sm font-bold text-primary border-b-2 border-primary py-5" href="/">Pod 列表</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/store">存储卷</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/memory">内存管理</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
+                    href="/aitools">AI 工具箱</a>
+            </nav>
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-slate-200 overflow-hidden ml-2">
+                    <img alt="User Profile" class="w-full h-full object-cover"
+                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJq5blQRMAftLWJpTxiZJprJqmgSCdQxYsQawbg-Ddra9iSfhhc0xJoqeKEZ0_gGhOjTD0BCT1DdnpQq7GhafGMIZ5w9L-3ohr_VMngtbViq1IWo80OJlYKJnTeAJsnrR3DSHe6P2GBmZLyvRldN2J4VugN4esw21fL6mb85QbhWdGz3fZDO-XB9OJfABjLTI1GUlyih5T43BSdUi3XkRzGM0ZNKqZcFrbM9WQx6teonyPrMqzlJXwyhtQjO8zs_cwi8x-emLwJoy7" />
+                </div>
+            </div>
+        </div>
+    </header>
+    <main class="max-w-[1440px] mx-auto p-6 space-y-6">
+        <nav class="flex items-center gap-2 text-sm text-slate-500">
+            <a class="hover:text-primary" href="/">Pod 列表</a>
+            <span class="material-symbols-outlined text-sm">chevron_right</span>
+            <span class="text-slate-900 font-medium dark:text-white" th:text="${pod.name + ' 详情'}">Pod 详情</span>
+        </nav>
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm p-6">
+            <div class="flex flex-col md:flex-row md:items-start justify-between gap-6">
+                <div class="flex items-start gap-4">
+                    <div class="p-3 bg-slate-50 dark:bg-slate-700/50 rounded-xl text-slate-600 dark:text-slate-300">
+                        <span class="material-symbols-outlined text-4xl">database</span>
+                    </div>
+                    <div>
+                        <div class="flex items-center gap-3">
+                            <h2 class="text-2xl font-black text-slate-900 dark:text-white" th:text="${pod.name}">
+                                pod-name</h2>
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                                th:classappend="${pod.status == 'Running'} ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'">
+                                <span class="w-1.5 h-1.5 rounded-full mr-1.5"
+                                    th:classappend="${pod.status == 'Running'} ? 'bg-emerald-500' : 'bg-red-500'"></span>
+                                <span th:text="${pod.status}">Status</span>
+                            </span>
+                        </div>
+                        <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-2">
+                            <div class="flex flex-col">
+                                <span class="text-xs text-slate-400 uppercase font-bold tracking-wider">命名空间</span>
+                                <span class="text-sm font-semibold text-slate-700 dark:text-slate-300"
+                                    th:text="${pod.namespace}">default</span>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-xs text-slate-400 uppercase font-bold tracking-wider">IP 地址</span>
+                                <span class="text-sm font-mono text-slate-700 dark:text-slate-300"
+                                    th:text="${pod.ip}">127.0.0.1</span>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-xs text-slate-400 uppercase font-bold tracking-wider">所在节点</span>
+                                <span class="text-sm font-semibold text-slate-700 dark:text-slate-300"
+                                    th:text="${pod.node}">node-01</span>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="text-xs text-slate-400 uppercase font-bold tracking-wider">重启次数</span>
+                                <div class="flex flex-col gap-1">
+                                    <span class="text-sm font-bold" th:text="${pod.restarts + ' 次'}">0 次</span>
+                                    <div th:if="${pod.containerRestarts != null && !pod.containerRestarts.isEmpty()}" class="text-xs text-slate-500 dark:text-slate-400">
+                                        <div th:each="entry : ${pod.containerRestarts}" class="flex items-center gap-2">
+                                            <span th:text="${entry.key + ': ' + entry.value + ' 次'}"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="showScaleModal()"
+                        class="flex items-center gap-2 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-sm font-bold transition-colors">
+                        <span class="material-symbols-outlined text-lg">tune</span>
+                        扩容/缩容
+                    </button>
+                    <button onclick="showUpdateModal()"
+                        class="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-sm font-bold transition-colors">
+                        <span class="material-symbols-outlined text-lg">settings</span>
+                        修改配置
+                    </button>
+                    <form method="post"
+                        th:action="@{/pods/{namespace}/{name}/delete(namespace=${pod.namespace},name=${pod.name})}"
+                        onsubmit="return confirm('确定要重启(删除)这个Pod吗?');">
+                        <button type="submit"
+                            class="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg text-sm font-bold transition-colors">
+                            <span class="material-symbols-outlined text-lg">restart_alt</span>
+                            重启 Pod
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="flex flex-col lg:flex-row gap-6">
+            <div class="flex-1 flex flex-col gap-4">
+                <div class="flex items-center border-b border-slate-200 dark:border-slate-700">
+                    <button onclick="switchTab('logs')" id="tab-logs"
+                        class="px-6 py-3 text-sm font-bold text-primary border-b-2 border-primary transition-colors">日志</button>
+                    <button onclick="switchTab('terminal')" id="tab-terminal"
+                        class="px-6 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors">终端</button>
+                    <button onclick="switchTab('yaml')" id="tab-yaml"
+                        class="px-6 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors">YAML</button>
+                </div>
+
+                <!-- Logs View -->
+                <div id="view-logs"
+                    class="bg-terminal-bg rounded-xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col h-[600px]">
+                    <div class="px-4 py-2 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+                        <div class="flex items-center gap-4">
+                            <div class="flex items-center gap-2 text-xs font-mono text-slate-400">
+                                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                                Real-time Streaming
+                            </div>
+                            <div class="h-4 w-[1px] bg-slate-700"></div>
+                            <div class="flex items-center gap-2">
+                                <input type="text" id="log-search" placeholder="Filter logs..."
+                                    class="bg-slate-800 border-none text-xs text-slate-300 py-1 px-2 rounded focus:ring-1 focus:ring-primary w-48"
+                                    onkeydown="if(event.key === 'Enter') fetchLogs()">
+                                <button onclick="fetchLogs()" class="text-slate-400 hover:text-white transition-colors"
+                                    title="Search">
+                                    <span class="material-symbols-outlined text-lg">search</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button onclick="document.getElementById('logs-content').innerText = ''"
+                                class="text-slate-400 hover:text-white transition-colors" title="清除">
+                                <span class="material-symbols-outlined text-lg">delete_sweep</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex-1 p-4 overflow-y-auto font-mono text-sm custom-scrollbar bg-[#0d1117] text-slate-300"
+                        id="logs-content">
+                        <pre th:text="${pod.logs}">Loading logs...</pre>
+                    </div>
+                </div>
+
+                <!-- Terminal View -->
+                <div id="view-terminal"
+                    class="hidden bg-terminal-bg rounded-xl border border-slate-800 shadow-2xl overflow-hidden flex flex-col h-[600px]">
+                    <div id="terminal-container" class="flex-1 p-2 bg-[#0d1117] h-full w-full"></div>
+                </div>
+
+                <!-- YAML View -->
+                <div id="view-yaml"
+                    class="hidden bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col h-[600px]">
+                    <div class="flex-1 p-4 overflow-y-auto font-mono text-sm custom-scrollbar bg-[#282c34]">
+                        <pre id="yaml-content"><code class="language-yaml" th:text="${pod.yaml}">Loading YAML...</code></pre>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Scale Modal -->
+        <dialog id="scaleModal"
+            class="p-0 rounded-xl shadow-2xl backdrop:bg-slate-900/50 open:animate-fade-in closed:animate-fade-out">
+            <div class="bg-white dark:bg-slate-800 p-6 min-w-[400px] w-full max-w-lg">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-lg font-bold text-slate-900 dark:text-white">扩容/缩容</h3>
+                    <button type="button" onclick="document.getElementById('scaleModal').close()"
+                        class="text-slate-400 hover:text-slate-600">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+                <form method="post" th:action="@{/pods/{namespace}/{name}/scale(namespace=${pod.namespace},name=${pod.name})}" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">副本数 (Replicas)</label>
+                        <input name="replicas" type="number" min="0" id="scale-replicas" required
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary outline-none" />
+                        <p class="text-xs text-slate-500 mt-1">当前可用副本数: <span id="current-replicas">-</span></p>
+                    </div>
+                    <div class="flex justify-end gap-3 mt-8">
+                        <button type="button" onclick="document.getElementById('scaleModal').close()"
+                            class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">取消</button>
+                        <button type="submit"
+                            class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 transition-colors font-medium">确认</button>
+                    </div>
+                </form>
+            </div>
+        </dialog>
+
+        <!-- Update Config Modal -->
+        <dialog id="updateModal"
+            class="p-0 rounded-xl shadow-2xl backdrop:bg-slate-900/50 open:animate-fade-in closed:animate-fade-out">
+            <div class="bg-white dark:bg-slate-800 p-6 min-w-[500px] w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-lg font-bold text-slate-900 dark:text-white">修改配置</h3>
+                    <button type="button" onclick="document.getElementById('updateModal').close()"
+                        class="text-slate-400 hover:text-slate-600">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+                <form method="post" th:action="@{/pods/{namespace}/{name}/update(namespace=${pod.namespace},name=${pod.name})}" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">镜像地址</label>
+                        <input name="image" type="text" id="update-image"
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary outline-none"
+                            placeholder="例如: nginx:latest" />
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">CPU 限制</label>
+                            <input name="cpuLimit" type="text" id="update-cpu-limit"
+                                class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary outline-none"
+                                placeholder="例如: 500m" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">内存限制</label>
+                            <input name="memoryLimit" type="text" id="update-memory-limit"
+                                class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary outline-none"
+                                placeholder="例如: 512Mi" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">CPU 请求</label>
+                            <input name="cpuRequest" type="text" id="update-cpu-request"
+                                class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary outline-none"
+                                placeholder="例如: 250m" />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">内存请求</label>
+                            <input name="memoryRequest" type="text" id="update-memory-request"
+                                class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary outline-none"
+                                placeholder="例如: 256Mi" />
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">环境变量</label>
+                        <textarea name="envVars" id="update-env-vars" rows="3"
+                            class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary outline-none"
+                            placeholder="格式: KEY1=VALUE1,KEY2=VALUE2"></textarea>
+                        <p class="text-xs text-slate-500 mt-1">多个环境变量用逗号分隔，格式: KEY=VALUE</p>
+                    </div>
+                    <div class="flex justify-end gap-3 mt-8">
+                        <button type="button" onclick="document.getElementById('updateModal').close()"
+                            class="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">取消</button>
+                        <button type="submit"
+                            class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-600 transition-colors font-medium">保存</button>
+                    </div>
+                </form>
+            </div>
+        </dialog>
+    </main>
+    <footer
+        class="max-w-[1440px] mx-auto px-6 py-8 border-t border-slate-200 dark:border-slate-800 flex justify-between items-center text-xs text-slate-500">
+        <div>© 2026 灵犀平台 - 智能云管理系统</div>
+        <div class="flex items-center gap-6">
+            <a class="hover:text-primary transition-colors" href="/dashboard">集群状态</a>
+            <a class="hover:text-primary transition-colors" href="/store">存储管理</a>
+            <a class="hover:text-primary transition-colors" href="/memory">内存管理</a>
+            <a class="hover:text-primary transition-colors" href="/aitools">AI 工具箱</a>
+        </div>
+    </footer>
+
+    <script th:inline="javascript">
+        const namespace = /*[[${pod.namespace}]]*/ 'default';
+        const podName = /*[[${pod.name}]]*/ '';
+        const containers = /*[[${pod.containers}]]*/ [];
+        const firstContainer = containers && containers.length > 0 ? containers[0] : '';
+
+        function switchTab(tabName) {
+            // Reset tabs
+            document.getElementById('tab-logs').className = "px-6 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors";
+            document.getElementById('tab-terminal').className = "px-6 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors";
+            document.getElementById('tab-yaml').className = "px-6 py-3 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors";
+
+            // Hide views
+            document.getElementById('view-logs').classList.add('hidden');
+            document.getElementById('view-terminal').classList.add('hidden');
+            document.getElementById('view-yaml').classList.add('hidden');
+
+            // Activate selected
+            document.getElementById('tab-' + tabName).className = "px-6 py-3 text-sm font-bold text-primary border-b-2 border-primary transition-colors";
+            document.getElementById('view-' + tabName).classList.remove('hidden');
+
+            if (tabName === 'terminal') {
+                // Initialize terminal on first show with a slight delay to ensure container is rendered
+                setTimeout(() => {
+                    initTerminal();
+                    if (fitAddon) fitAddon.fit();
+                }, 100);
+            }
+            if (tabName === 'yaml') {
+                // Highlight YAML syntax when YAML tab is shown
+                setTimeout(() => {
+                    const yamlCode = document.querySelector('#yaml-content code');
+                    if (yamlCode && typeof hljs !== 'undefined') {
+                        hljs.highlightElement(yamlCode);
+                    }
+                }, 100);
+            }
+        }
+
+        function fetchLogs() {
+            const keyword = document.getElementById('log-search').value;
+            const url = `/pods/${namespace}/${podName}/logs?keyword=${encodeURIComponent(keyword)}`;
+
+            const contentDiv = document.getElementById('logs-content');
+            contentDiv.innerHTML = '<div class="text-slate-500 italic">Searching logs...</div>';
+
+            fetch(url)
+                .then(response => response.text())
+                .then(data => {
+                    const pre = document.createElement('pre');
+                    pre.innerText = data;
+                    contentDiv.innerHTML = '';
+                    contentDiv.appendChild(pre);
+                })
+                .catch(err => {
+                    contentDiv.innerHTML = `<div class="text-red-500">Error fetching logs: ${err}</div>`;
+                });
+        }
+
+        // Terminal Logic
+        let term;
+        let socket;
+        let fitAddon;
+
+        function initTerminal() {
+            if (term) return; // Already initialized
+
+            const termContainer = document.getElementById('terminal-container');
+
+            term = new Terminal({
+                cursorBlink: true,
+                theme: {
+                    background: '#0d1117',
+                    foreground: '#c9d1d9',
+                },
+                fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                fontSize: 13,
+                // Enable ANSI color support
+                allowProposedApi: true,
+                convertEol: true,
+                // Enable 256 color support for better color rendering
+                allowTransparency: false
+            });
+
+            fitAddon = new FitAddon.FitAddon();
+            term.loadAddon(fitAddon);
+
+            term.open(termContainer);
+            fitAddon.fit();
+
+            // Connect WebSocket
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            // Use first container name, or empty string if no containers
+            const containerName = firstContainer || '';
+            const wsUrl = `${protocol}//${window.location.host}/terminal?namespace=${namespace}&pod=${podName}&container=${containerName}`;
+
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = () => {
+                // Use ANSI color codes for green text
+                term.write('\r\n\u001b[32mConnected to terminal...\u001b[0m\r\n');
+                fitAddon.fit();
+            };
+
+            socket.onmessage = (event) => {
+                // Write data to terminal - xterm.js automatically handles ANSI color codes
+                term.write(event.data);
+            };
+
+            socket.onclose = () => {
+                // Use ANSI color codes for red text
+                term.write('\r\n\u001b[31mConnection closed.\u001b[0m\r\n');
+            };
+
+            socket.onerror = (error) => {
+                term.write('\r\n\x1b[31mConnection error.\x1b[0m\r\n');
+            };
+
+            term.onData(data => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(data);
+                }
+            });
+
+            // Handle resize
+            new ResizeObserver(() => fitAddon.fit()).observe(termContainer);
+        }
+
+        // Scale Modal Functions
+        function showScaleModal() {
+            fetch(`/pods/${namespace}/${podName}/deployment`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('无法获取 Deployment 信息: ' + data.error);
+                        return;
+                    }
+                    const currentReplicas = data.replicas || 0;
+                    const availableReplicas = data.availableReplicas || 0;
+                    document.getElementById('scale-replicas').value = currentReplicas;
+                    document.getElementById('current-replicas').textContent = availableReplicas;
+                    document.getElementById('scaleModal').showModal();
+                })
+                .catch(err => {
+                    alert('获取 Deployment 信息失败: ' + err.message);
+                });
+        }
+
+        // Update Config Modal Functions
+        function showUpdateModal() {
+            fetch(`/pods/${namespace}/${podName}/deployment`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('无法获取 Deployment 信息: ' + data.error);
+                        return;
+                    }
+                    // 填充表单
+                    if (data.image) {
+                        document.getElementById('update-image').value = data.image;
+                    }
+                    if (data.cpuLimit) {
+                        document.getElementById('update-cpu-limit').value = data.cpuLimit;
+                    }
+                    if (data.memoryLimit) {
+                        document.getElementById('update-memory-limit').value = data.memoryLimit;
+                    }
+                    if (data.cpuRequest) {
+                        document.getElementById('update-cpu-request').value = data.cpuRequest;
+                    }
+                    if (data.memoryRequest) {
+                        document.getElementById('update-memory-request').value = data.memoryRequest;
+                    }
+                    if (data.envVars) {
+                        const envStr = Object.entries(data.envVars).map(([k, v]) => `${k}=${v}`).join(',');
+                        document.getElementById('update-env-vars').value = envStr;
+                    }
+                    document.getElementById('updateModal').showModal();
+                })
+                .catch(err => {
+                    alert('获取 Deployment 信息失败: ' + err.message);
+                });
+        }
+    </script>
+
+</body>
+
+</html>
