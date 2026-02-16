@@ -10,15 +10,12 @@ import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
-import io.fabric8.kubernetes.client.dsl.LogWatch;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import jakarta.annotation.PostConstruct;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.*;
@@ -518,20 +515,65 @@ public class DevOpsService {
     }
 
     /**
-     * Stream logs from a specific container in a pod.
+     * Stream logs from a specific container in a pod using polling.
+     * Handles PodInitializing gracefully by retrying.
      */
     private void streamContainerLogs(KubernetesClient client, String podName, String namespace,
             String containerName, PipelineRun run) {
         try {
-            Thread.sleep(1000);
-            LogWatch logWatch = client.pods().inNamespace(namespace).withName(podName)
-                    .inContainer(containerName).watchLog();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(logWatch.getOutput()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    run.addLog(line);
+            int lastLineCount = 0;
+            for (int i = 0; i < 360; i++) { // up to 30 min
+                Pod pod = client.pods().inNamespace(namespace).withName(podName).get();
+                if (pod == null)
+                    return;
+
+                String phase = pod.getStatus().getPhase();
+                if ("Failed".equals(phase)) {
+                    run.addLog("[ERROR] Pod 状态为 Failed");
                     broadcastLog(run);
+                    return;
                 }
+
+                // Check if the container is running or terminated
+                boolean containerReady = false;
+                boolean containerTerminated = false;
+                if (pod.getStatus().getContainerStatuses() != null) {
+                    for (var cs : pod.getStatus().getContainerStatuses()) {
+                        if (containerName.equals(cs.getName()) && cs.getState() != null) {
+                            if (cs.getState().getRunning() != null)
+                                containerReady = true;
+                            if (cs.getState().getTerminated() != null) {
+                                containerReady = true;
+                                containerTerminated = true;
+                            }
+                        }
+                    }
+                }
+
+                if (containerReady) {
+                    try {
+                        String logs = client.pods().inNamespace(namespace).withName(podName)
+                                .inContainer(containerName).getLog();
+                        if (logs != null && !logs.isEmpty()) {
+                            String[] lines = logs.split("\n");
+                            for (int j = lastLineCount; j < lines.length; j++) {
+                                run.addLog(lines[j]);
+                            }
+                            if (lines.length > lastLineCount) {
+                                lastLineCount = lines.length;
+                                broadcastLog(run);
+                            }
+                        }
+                    } catch (Exception logErr) {
+                        // Transient error, continue polling
+                    }
+                }
+
+                if (containerTerminated || "Succeeded".equals(phase)) {
+                    return;
+                }
+
+                Thread.sleep(5000);
             }
         } catch (Exception e) {
             run.addLog("[WARN] " + containerName + " 日志流结束: " + e.getMessage());
@@ -631,7 +673,7 @@ public class DevOpsService {
         }
 
         String cloneCommand = String.format(
-                "git clone --depth 1 --branch %s %s /workspace && echo '[INFO] Clone completed successfully'",
+                "apk add --no-cache git && git clone --depth 1 --branch %s %s /workspace && echo '[INFO] Clone completed successfully'",
                 config.getBranch(), cloneUrl);
 
         // Start building the Job
@@ -703,6 +745,10 @@ public class DevOpsService {
                 .withName("docker-config")
                 .withNewSecret()
                 .withSecretName("harbor-registry-secret")
+                .addNewItem()
+                .withKey(".dockerconfigjson")
+                .withPath("config.json")
+                .endItem()
                 .endSecret()
                 .endVolume()
                 .addNewVolume()
