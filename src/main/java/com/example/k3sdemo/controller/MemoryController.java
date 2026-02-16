@@ -39,11 +39,12 @@ public class MemoryController {
         initClient();
         try (KubernetesClient client = new KubernetesClientBuilder().build()) {
             List<Node> nodes = client.nodes().list().getItems();
-            List<Pod> pods = client.pods().inAnyNamespace().list().getItems();
+            // 只获取 default 命名空间的 Pod
+            List<Pod> pods = client.pods().inNamespace("default").list().getItems();
             
             // 调试日志
             System.out.println("Memory page - Nodes count: " + nodes.size());
-            System.out.println("Memory page - Pods count: " + pods.size());
+            System.out.println("Memory page - Pods count (default namespace): " + pods.size());
 
             // 1. 计算总物理内存和已分配内存
             long totalMemoryBytes = 0;
@@ -105,6 +106,16 @@ public class MemoryController {
 
             // 4. 获取 Pod 内存排行
             List<PodMemoryViewModel> podMemories = getPodMemoryRanking(pods);
+            
+            // 调试日志
+            System.out.println("Memory page - NodeMemories count: " + nodeMemories.size());
+            System.out.println("Memory page - PodMemories count: " + podMemories.size());
+            if (!podMemories.isEmpty()) {
+                System.out.println("Memory page - First Pod: " + podMemories.get(0).getPodName() + " in " + podMemories.get(0).getNamespace());
+            }
+            if (!nodeMemories.isEmpty()) {
+                System.out.println("Memory page - First Node: " + nodeMemories.get(0).getNodeName() + ", Memory: " + nodeMemories.get(0).getTotalMemory());
+            }
 
             model.addAttribute("overview", overview);
             model.addAttribute("nodeMemories", nodeMemories);
@@ -154,7 +165,8 @@ public class MemoryController {
         initClient();
         try (KubernetesClient client = new KubernetesClientBuilder().build()) {
             List<Node> nodes = client.nodes().list().getItems();
-            List<Pod> pods = client.pods().inAnyNamespace().list().getItems();
+            // 只获取 default 命名空间的 Pod
+            List<Pod> pods = client.pods().inNamespace("default").list().getItems();
             
             // 1. 收集节点内存分布数据
             List<NodeMemoryViewModel> nodeMemories = new ArrayList<>();
@@ -438,8 +450,15 @@ public class MemoryController {
     private List<PodMemoryViewModel> getPodMemoryRanking(List<Pod> pods) {
         List<PodMemoryViewModel> podMemories = new ArrayList<>();
         
+        System.out.println("getPodMemoryRanking - Processing " + pods.size() + " pods");
+        
         for (Pod pod : pods) {
-            if (pod.getSpec().getContainers() != null && !pod.getSpec().getContainers().isEmpty()) {
+            try {
+                if (pod.getSpec() == null || pod.getSpec().getContainers() == null || pod.getSpec().getContainers().isEmpty()) {
+                    System.out.println("getPodMemoryRanking - Pod " + pod.getMetadata().getName() + " has no containers, skipping");
+                    continue;
+                }
+                
                 io.fabric8.kubernetes.api.model.Container container = pod.getSpec().getContainers().get(0);
                 io.fabric8.kubernetes.api.model.ResourceRequirements resources = container.getResources();
                 
@@ -456,59 +475,107 @@ public class MemoryController {
                     }
                 }
                 
-                // 使用真实的内存配置数据
-                // 注意：实际运行时内存使用量需要 metrics server，这里显示的是配置的 requests（真实分配值）
+                System.out.println("getPodMemoryRanking - Pod: " + pod.getMetadata().getName() + 
+                    ", Request: " + memoryRequest + ", Limit: " + memoryLimit);
+                
+                // 修改：即使没有设置内存限制，也显示 Pod（显示为"未设置"）
+                long limitBytes = 0;
+                long requestBytes = 0;
+                
                 if (!memoryLimit.equals("0")) {
-                    long limitBytes = parseQuantityToBytes(memoryLimit);
-                    long requestBytes = parseQuantityToBytes(memoryRequest);
-                    
-                    // 使用 requests 作为"已分配内存"的显示值（这是真实的配置值）
-                    // 如果没有 requests，说明没有设置资源请求，显示为"未设置"
-                    actualUsage = requestBytes > 0 ? formatBytes(requestBytes) : "未设置";
-                    
-                    // 计算分配率：基于 requests/limit 的比例（这是真实的资源分配比例）
-                    // 如果 requests 为 0，使用 limit 的 50% 作为参考值来计算状态
-                    double usagePercent = 0;
-                    if (requestBytes > 0) {
-                        usagePercent = limitBytes > 0 ? (double) requestBytes / limitBytes * 100 : 0;
-                    } else {
-                        // 如果没有设置 requests，使用 limit 的 50% 作为参考值
-                        usagePercent = 50.0;
-                    }
-                    
-                    // 根据 requests/limit 的比例判断状态
-                    // 如果 requests 接近 limit，说明资源分配紧张
-                    String status = "运行正常";
-                    String statusClass = "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
-                    if (requestBytes == 0) {
-                        status = "未设置请求";
-                        statusClass = "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400";
-                    } else if (usagePercent > 90) {
-                        status = "资源紧张";
-                        statusClass = "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
-                    } else if (usagePercent > 75) {
-                        status = "接近限额";
-                        statusClass = "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
-                    }
-                    
-                    podMemories.add(new PodMemoryViewModel(
-                        pod.getMetadata().getName(),
-                        pod.getMetadata().getNamespace(),
-                        memoryRequest,
-                        memoryLimit,
-                        actualUsage,
-                        usagePercent,
-                        status,
-                        statusClass
-                    ));
+                    limitBytes = parseQuantityToBytes(memoryLimit);
                 }
+                if (!memoryRequest.equals("0")) {
+                    requestBytes = parseQuantityToBytes(memoryRequest);
+                }
+                
+                // 格式化显示值
+                String displayRequest = memoryRequest.equals("0") ? "未设置" : memoryRequest;
+                String displayLimit = memoryLimit.equals("0") ? "未设置" : memoryLimit;
+                
+                // 使用 requests 作为"已分配内存"的显示值（这是真实的配置值）
+                actualUsage = requestBytes > 0 ? formatBytes(requestBytes) : "未设置";
+                
+                // 计算分配率：基于 requests/limit 的比例（这是真实的资源分配比例）
+                // 如果 requests 为 0，使用 limit 的 50% 作为参考值来计算状态
+                // 如果 limit 也为 0，使用 0% 作为使用率
+                double usagePercent = 0;
+                if (requestBytes > 0 && limitBytes > 0) {
+                    usagePercent = (double) requestBytes / limitBytes * 100;
+                } else if (limitBytes > 0 && requestBytes == 0) {
+                    // 如果没有设置 requests，使用 limit 的 50% 作为参考值
+                    usagePercent = 50.0;
+                } else {
+                    // 两者都未设置
+                    usagePercent = 0.0;
+                }
+                
+                // 根据 requests/limit 的比例判断状态
+                String status = "运行正常";
+                String statusClass = "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
+                if (memoryLimit.equals("0") && memoryRequest.equals("0")) {
+                    status = "未设置资源";
+                    statusClass = "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400";
+                } else if (memoryRequest.equals("0")) {
+                    status = "未设置请求";
+                    statusClass = "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400";
+                } else if (limitBytes > 0 && usagePercent > 90) {
+                    status = "资源紧张";
+                    statusClass = "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
+                } else if (limitBytes > 0 && usagePercent > 75) {
+                    status = "接近限额";
+                    statusClass = "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
+                }
+                
+                podMemories.add(new PodMemoryViewModel(
+                    pod.getMetadata().getName(),
+                    pod.getMetadata().getNamespace(),
+                    displayRequest,
+                    displayLimit,
+                    actualUsage,
+                    usagePercent,
+                    status,
+                    statusClass
+                ));
+                
+                System.out.println("getPodMemoryRanking - Added Pod: " + pod.getMetadata().getName() + 
+                    " to list (total: " + podMemories.size() + ")");
+            } catch (Exception e) {
+                System.err.println("getPodMemoryRanking - Error processing Pod " + 
+                    (pod.getMetadata() != null ? pod.getMetadata().getName() : "unknown") + ": " + e.getMessage());
+                e.printStackTrace();
             }
         }
         
         // 按内存限制（Limit）排序，因为这是真实的配置值
+        // 如果 Limit 是 "未设置"，则按 Request 排序；如果都是 "未设置"，则排到最后
         podMemories.sort((a, b) -> {
-            long aBytes = parseQuantityToBytes(a.getMemoryLimit());
-            long bBytes = parseQuantityToBytes(b.getMemoryLimit());
+            long aBytes = 0;
+            long bBytes = 0;
+            
+            // 尝试解析 Limit，如果失败（"未设置"），尝试解析 Request
+            try {
+                if (!a.getMemoryLimit().equals("未设置") && !a.getMemoryLimit().equals("0")) {
+                    aBytes = parseQuantityToBytes(a.getMemoryLimit());
+                } else if (!a.getMemoryRequest().equals("未设置") && !a.getMemoryRequest().equals("0")) {
+                    aBytes = parseQuantityToBytes(a.getMemoryRequest());
+                }
+            } catch (Exception e) {
+                // 解析失败，使用 0
+                aBytes = 0;
+            }
+            
+            try {
+                if (!b.getMemoryLimit().equals("未设置") && !b.getMemoryLimit().equals("0")) {
+                    bBytes = parseQuantityToBytes(b.getMemoryLimit());
+                } else if (!b.getMemoryRequest().equals("未设置") && !b.getMemoryRequest().equals("0")) {
+                    bBytes = parseQuantityToBytes(b.getMemoryRequest());
+                }
+            } catch (Exception e) {
+                // 解析失败，使用 0
+                bBytes = 0;
+            }
+            
             return Long.compare(bBytes, aBytes);
         });
         

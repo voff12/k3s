@@ -41,7 +41,7 @@ public class PodController {
 
                 // Filter logic
                 if (search != null && !search.isEmpty() && !podName.contains(search)
-                        && !pod.getStatus().getPodIP().contains(search)) {
+                        && (pod.getStatus().getPodIP() == null || !pod.getStatus().getPodIP().contains(search))) {
                     continue;
                 }
                 if (status != null && !status.isEmpty() && !status.equals(podStatus)) {
@@ -175,7 +175,7 @@ public class PodController {
             // 计算重启次数 - 从所有容器状态中获取真实的重启次数
             int restarts = 0;
             java.util.Map<String, Integer> containerRestarts = new java.util.HashMap<>();
-            
+
             if (pod.getStatus() != null && pod.getStatus().getContainerStatuses() != null) {
                 for (ContainerStatus cs : pod.getStatus().getContainerStatuses()) {
                     if (cs != null && cs.getName() != null && cs.getRestartCount() != null) {
@@ -307,7 +307,8 @@ public class PodController {
                             Integer currentReplicas = deployment.getSpec().getReplicas();
                             targetReplicas = (currentReplicas != null) ? currentReplicas : 1;
                         }
-                        client.apps().deployments().inNamespace(namespace).withName(deploymentName).scale(targetReplicas);
+                        client.apps().deployments().inNamespace(namespace).withName(deploymentName)
+                                .scale(targetReplicas);
                     }
                 }
             }
@@ -343,21 +344,23 @@ public class PodController {
                                 deployment.getSpec().getTemplate().getSpec().getContainers().get(0).setImage(image);
                             }
                         }
-                        
+
                         // 更新资源限制和请求
                         if (deployment.getSpec().getTemplate().getSpec().getContainers() != null
                                 && !deployment.getSpec().getTemplate().getSpec().getContainers().isEmpty()) {
                             io.fabric8.kubernetes.api.model.Container container = deployment.getSpec().getTemplate()
                                     .getSpec().getContainers().get(0);
-                            
+
                             io.fabric8.kubernetes.api.model.ResourceRequirements resources = container.getResources();
                             if (resources == null) {
                                 resources = new io.fabric8.kubernetes.api.model.ResourceRequirements();
                             }
-                            
+
                             // 设置资源限制
-                            if (cpuLimit != null && !cpuLimit.isEmpty() || memoryLimit != null && !memoryLimit.isEmpty()) {
-                                java.util.Map<String, io.fabric8.kubernetes.api.model.Quantity> limits = resources.getLimits();
+                            if (cpuLimit != null && !cpuLimit.isEmpty()
+                                    || memoryLimit != null && !memoryLimit.isEmpty()) {
+                                java.util.Map<String, io.fabric8.kubernetes.api.model.Quantity> limits = resources
+                                        .getLimits();
                                 if (limits == null) {
                                     limits = new java.util.HashMap<>();
                                 }
@@ -369,10 +372,12 @@ public class PodController {
                                 }
                                 resources.setLimits(limits);
                             }
-                            
+
                             // 设置资源请求
-                            if (cpuRequest != null && !cpuRequest.isEmpty() || memoryRequest != null && !memoryRequest.isEmpty()) {
-                                java.util.Map<String, io.fabric8.kubernetes.api.model.Quantity> requests = resources.getRequests();
+                            if (cpuRequest != null && !cpuRequest.isEmpty()
+                                    || memoryRequest != null && !memoryRequest.isEmpty()) {
+                                java.util.Map<String, io.fabric8.kubernetes.api.model.Quantity> requests = resources
+                                        .getRequests();
                                 if (requests == null) {
                                     requests = new java.util.HashMap<>();
                                 }
@@ -384,9 +389,9 @@ public class PodController {
                                 }
                                 resources.setRequests(requests);
                             }
-                            
+
                             container.setResources(resources);
-                            
+
                             // 更新环境变量
                             if (envVars != null && !envVars.isEmpty()) {
                                 List<io.fabric8.kubernetes.api.model.EnvVar> envList = new ArrayList<>();
@@ -405,7 +410,7 @@ public class PodController {
                                 }
                             }
                         }
-                        
+
                         // 更新 Deployment
                         client.apps().deployments().inNamespace(namespace).resource(deployment).update();
                     }
@@ -419,7 +424,8 @@ public class PodController {
 
     @org.springframework.web.bind.annotation.GetMapping("/pods/{namespace}/{name}/deployment")
     @org.springframework.web.bind.annotation.ResponseBody
-    public java.util.Map<String, Object> getDeploymentInfo(@org.springframework.web.bind.annotation.PathVariable String namespace,
+    public java.util.Map<String, Object> getDeploymentInfo(
+            @org.springframework.web.bind.annotation.PathVariable String namespace,
             @org.springframework.web.bind.annotation.PathVariable String name) {
         initClient();
         java.util.Map<String, Object> result = new java.util.HashMap<>();
@@ -434,29 +440,33 @@ public class PodController {
                         result.put("deploymentName", deploymentName);
                         result.put("replicas", deployment.getSpec().getReplicas());
                         result.put("availableReplicas", deployment.getStatus().getAvailableReplicas());
-                        
+
                         if (deployment.getSpec().getTemplate().getSpec().getContainers() != null
                                 && !deployment.getSpec().getTemplate().getSpec().getContainers().isEmpty()) {
                             io.fabric8.kubernetes.api.model.Container container = deployment.getSpec().getTemplate()
                                     .getSpec().getContainers().get(0);
                             result.put("image", container.getImage());
-                            
+
                             io.fabric8.kubernetes.api.model.ResourceRequirements resources = container.getResources();
                             if (resources != null) {
                                 if (resources.getLimits() != null) {
-                                    result.put("cpuLimit", resources.getLimits().get("cpu") != null 
-                                            ? resources.getLimits().get("cpu").getAmount() : null);
-                                    result.put("memoryLimit", resources.getLimits().get("memory") != null 
-                                            ? resources.getLimits().get("memory").getAmount() : null);
+                                    result.put("cpuLimit", resources.getLimits().get("cpu") != null
+                                            ? resources.getLimits().get("cpu").getAmount()
+                                            : null);
+                                    result.put("memoryLimit", resources.getLimits().get("memory") != null
+                                            ? resources.getLimits().get("memory").getAmount()
+                                            : null);
                                 }
                                 if (resources.getRequests() != null) {
-                                    result.put("cpuRequest", resources.getRequests().get("cpu") != null 
-                                            ? resources.getRequests().get("cpu").getAmount() : null);
-                                    result.put("memoryRequest", resources.getRequests().get("memory") != null 
-                                            ? resources.getRequests().get("memory").getAmount() : null);
+                                    result.put("cpuRequest", resources.getRequests().get("cpu") != null
+                                            ? resources.getRequests().get("cpu").getAmount()
+                                            : null);
+                                    result.put("memoryRequest", resources.getRequests().get("memory") != null
+                                            ? resources.getRequests().get("memory").getAmount()
+                                            : null);
                                 }
                             }
-                            
+
                             if (container.getEnv() != null) {
                                 java.util.Map<String, String> envMap = new java.util.HashMap<>();
                                 for (io.fabric8.kubernetes.api.model.EnvVar env : container.getEnv()) {

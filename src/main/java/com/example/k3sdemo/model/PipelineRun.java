@@ -1,0 +1,148 @@
+package com.example.k3sdemo.model;
+
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Tracks a single pipeline execution state.
+ */
+public class PipelineRun {
+
+    public enum Status {
+        PENDING("等待中"),
+        CLONING("代码克隆"),
+        PACKAGING("Maven打包"),
+        BUILDING("镜像构建"),
+        PUSHING("镜像推送"),
+        DEPLOYING("K3s部署"),
+        SUCCESS("成功"),
+        FAILED("失败");
+
+        private final String label;
+
+        Status(String label) {
+            this.label = label;
+        }
+
+        public String getLabel() {
+            return label;
+        }
+    }
+
+    private final String id;
+    private final PipelineConfig config;
+    private volatile Status status;
+    private volatile int currentStep; // 0-5
+    private final LocalDateTime startTime;
+    private volatile LocalDateTime endTime;
+    private final List<String> logs;
+    private volatile String errorMessage;
+    private volatile LocalDateTime lastActivityTime;
+
+    public PipelineRun(PipelineConfig config) {
+        this.id = UUID.randomUUID().toString().substring(0, 8);
+        this.config = config;
+        this.status = Status.PENDING;
+        this.currentStep = -1;
+        this.startTime = LocalDateTime.now();
+        this.lastActivityTime = this.startTime;
+        this.logs = Collections.synchronizedList(new ArrayList<>());
+    }
+
+    // --- Log operations ---
+
+    public void addLog(String line) {
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        logs.add("[" + timestamp + "] " + line);
+        this.lastActivityTime = LocalDateTime.now();
+    }
+
+    public List<String> getLogs() {
+        return logs;
+    }
+
+    public List<String> getLogsSince(int fromIndex) {
+        if (fromIndex >= logs.size())
+            return Collections.emptyList();
+        return new ArrayList<>(logs.subList(fromIndex, logs.size()));
+    }
+
+    // --- State transitions ---
+
+    public void advanceTo(Status newStatus) {
+        this.status = newStatus;
+        this.lastActivityTime = LocalDateTime.now();
+        switch (newStatus) {
+            case CLONING -> currentStep = 0;
+            case PACKAGING -> currentStep = 1;
+            case BUILDING -> currentStep = 2;
+            case PUSHING -> currentStep = 3;
+            case DEPLOYING -> currentStep = 4;
+            case SUCCESS, FAILED -> {
+                currentStep = 5;
+                endTime = LocalDateTime.now();
+            }
+            default -> {
+            }
+        }
+    }
+
+    public void fail(String errorMessage) {
+        this.errorMessage = errorMessage;
+        this.status = Status.FAILED;
+        this.endTime = LocalDateTime.now();
+        addLog("[ERROR] " + errorMessage);
+    }
+
+    // --- Getters ---
+
+    public String getId() {
+        return id;
+    }
+
+    public PipelineConfig getConfig() {
+        return config;
+    }
+
+    public Status getStatus() {
+        return status;
+    }
+
+    public int getCurrentStep() {
+        return currentStep;
+    }
+
+    public LocalDateTime getStartTime() {
+        return startTime;
+    }
+
+    public LocalDateTime getEndTime() {
+        return endTime;
+    }
+
+    public String getErrorMessage() {
+        return errorMessage;
+    }
+
+    public LocalDateTime getLastActivityTime() {
+        return lastActivityTime;
+    }
+
+    public boolean isFinished() {
+        return status == Status.SUCCESS || status == Status.FAILED;
+    }
+
+    public String getDuration() {
+        LocalDateTime end = endTime != null ? endTime : LocalDateTime.now();
+        long seconds = java.time.Duration.between(startTime, end).getSeconds();
+        return String.format("%02d:%02d", seconds / 60, seconds % 60);
+    }
+
+    public String getStartTimeFormatted() {
+        return startTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+}

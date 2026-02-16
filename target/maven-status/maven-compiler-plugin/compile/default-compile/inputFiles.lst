@@ -1,6 +1,9 @@
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/config/WebSocketConfig.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/DevOpsController.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/NodeMemoryViewModel.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/PipelineRun.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/K3sDemoApplication.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/PipelineConfig.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/handler/TerminalWebSocketHandler.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/StoreController.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/AiToolsController.java
@@ -9,6 +12,7 @@
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/NodeDiskViewModel.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/service/QwenService.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/PodController.java
+/Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/service/DevOpsService.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/controller/DashboardController.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/PodViewModel.java
 /Users/wuxiang/Documents/work/2026/k3s/src/main/java/com/example/k3sdemo/model/PodMemoryViewModel.java
