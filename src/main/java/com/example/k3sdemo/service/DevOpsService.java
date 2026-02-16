@@ -48,6 +48,12 @@ public class DevOpsService {
     @Value("${kaniko.image:registry.cn-hangzhou.aliyuncs.com/kaniko-project/executor:latest}")
     private String kanikoImage;
 
+    @Value("${git.image:alpine/git:latest}")
+    private String gitImage;
+
+    @Value("${maven.image:maven:3.9-eclipse-temurin-17}")
+    private String mavenImage;
+
     private final Map<String, PipelineRun> pipelineRuns = new ConcurrentHashMap<>();
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
@@ -248,6 +254,7 @@ public class DevOpsService {
 
     /**
      * Wait for the Job pod to appear (any phase). Returns pod name or null.
+     * ── Layer 2: Pod 创建防御 ──
      */
     private String waitForPodName(KubernetesClient client, String jobName, PipelineRun run)
             throws InterruptedException {
@@ -257,12 +264,24 @@ public class DevOpsService {
             if (!pods.isEmpty()) {
                 Pod pod = pods.get(0);
                 if ("Failed".equals(pod.getStatus().getPhase())) {
-                    run.addLog("[ERROR] Pod 启动失败");
+                    String reason = parsePodConditions(pod);
+                    run.addLog("[ERROR] Pod 启动失败" + (reason != null ? ": " + reason : ""));
+                    String events = parsePodEvents(client, pod.getMetadata().getName());
+                    if (events != null)
+                        run.addLog("[ERROR] 事件详情: " + events);
+                    broadcastLog(run);
                     return null;
                 }
                 String detail = getPodWaitingReason(pod);
                 if (detail != null && (detail.contains("ImagePullBackOff") || detail.contains("ErrImagePull"))) {
                     run.addLog("[ERROR] 镜像拉取失败: " + detail);
+                    broadcastLog(run);
+                    return null;
+                }
+                // Check for Unschedulable
+                String condition = parsePodConditions(pod);
+                if (condition != null && condition.contains("Unschedulable")) {
+                    run.addLog("[ERROR] Pod 无法调度: " + condition);
                     broadcastLog(run);
                     return null;
                 }
@@ -315,17 +334,29 @@ public class DevOpsService {
                         // Log fetch may fail transiently, continue polling
                     }
 
-                    // If terminated, check exit code and return
+                    // ── Layer 4: 构建执行防御 — 精确诊断 exit code ──
                     if ("terminated".equals(containerState)) {
-                        return checkInitContainerSucceeded(client, podName, containerName);
+                        return checkInitContainerSucceeded(client, podName, containerName, run);
                     }
                 } else if ("waiting".equals(containerState)) {
-                    // Check for image pull errors
+                    // ── Layer 3: 调度 & 拉镜像防御 ──
                     String reason = getInitContainerWaitingReason(pod, containerName);
-                    if (reason != null && (reason.contains("ImagePullBackOff") || reason.contains("ErrImagePull"))) {
-                        run.addLog("[ERROR] " + containerName + " 镜像拉取失败: " + reason);
-                        broadcastLog(run);
-                        return false;
+                    if (reason != null) {
+                        if (reason.contains("ImagePullBackOff") || reason.contains("ErrImagePull")) {
+                            run.addLog("[ERROR] " + containerName + " 镜像拉取失败: " + reason);
+                            broadcastLog(run);
+                            return false;
+                        }
+                        if (reason.contains("CrashLoopBackOff")) {
+                            run.addLog("[ERROR] " + containerName + " 反复崩溃 (CrashLoopBackOff)");
+                            broadcastLog(run);
+                            return false;
+                        }
+                        if (reason.contains("CreateContainerConfigError")) {
+                            run.addLog("[ERROR] " + containerName + " 配置错误: Secret/ConfigMap 缺失");
+                            broadcastLog(run);
+                            return false;
+                        }
                     }
                     if (i % 6 == 0 && i > 0) {
                         run.addLog("[INFO] " + containerName + " 等待中" +
@@ -351,7 +382,7 @@ public class DevOpsService {
                         }
                     } catch (Exception ignored) {
                     }
-                    return checkInitContainerSucceeded(client, podName, containerName);
+                    return checkInitContainerSucceeded(client, podName, containerName, run);
                 }
 
                 Thread.sleep(5000);
@@ -618,7 +649,7 @@ public class DevOpsService {
                 // Init container 1: Git clone
                 .addNewInitContainer()
                 .withName("git-clone")
-                .withImage("alpine/git:latest")
+                .withImage(gitImage)
                 .withCommand("sh", "-c", cloneCommand)
                 .addNewVolumeMount()
                 .withName("workspace")
@@ -634,7 +665,7 @@ public class DevOpsService {
             jobBuilder = jobBuilder
                     .addNewInitContainer()
                     .withName("maven-build")
-                    .withImage("maven:3.9-eclipse-temurin-17")
+                    .withImage(mavenImage)
                     .withCommand("sh", "-c", mvnCommand)
                     .addNewVolumeMount()
                     .withName("workspace")
