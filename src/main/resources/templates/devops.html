@@ -144,8 +144,7 @@
             <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0">
                 <div class="flex items-center gap-4">
                     <h1 class="text-lg font-bold text-slate-900">CI/CD 流水线</h1>
-                    <span class="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">K3s + Kaniko +
-                        Harbor</span>
+                    <span class="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">K3s + Kaniko (离线模式)</span>
                 </div>
                 <div class="flex items-center gap-3">
                     <button onclick="refreshPipelines()"
@@ -235,10 +234,10 @@
                                 <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="3">
                                     <div id="step3"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
-                                        <span class="material-symbols-outlined">cloud_upload</span>
+                                        <span class="material-symbols-outlined">download_for_offline</span>
                                     </div>
                                     <div class="text-center">
-                                        <p class="text-xs font-bold">推送 Harbor</p>
+                                        <p class="text-xs font-bold">导入节点</p>
                                         <p class="text-[10px] text-slate-400" id="step3label">等待中</p>
                                     </div>
                                 </div>
@@ -353,12 +352,12 @@
                                             <span class="font-mono font-medium text-slate-700">Kaniko in K3s Job</span>
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
-                                            <span class="text-slate-500">镜像仓库</span>
-                                            <span class="font-mono font-medium text-slate-700">Harbor</span>
+                                            <span class="text-slate-500">镜像存储</span>
+                                            <span class="font-mono font-medium text-success">本地 containerd</span>
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">部署方式</span>
-                                            <span class="font-mono font-medium text-slate-700">K3s kubectl</span>
+                                            <span class="font-mono font-medium text-slate-700">K3s ctr import</span>
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">消息推送</span>
@@ -533,6 +532,19 @@
                     <p class="text-[11px] text-slate-400 mt-1">支持 GitLab Personal Access Token / Project Token，用于克隆私有仓库
                     </p>
                 </div>
+                <!-- Git Proxy -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Git 代理
+                        <span class="text-slate-400 font-normal normal-case">(访问 GitHub 加速)</span></label>
+                    <div class="relative">
+                        <span
+                            class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">vpn_lock</span>
+                        <input type="text" id="formGitProxy" placeholder="留空则使用全局配置或直连, 例: http://10.0.0.1:7890"
+                            class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono" />
+                    </div>
+                    <p class="text-[11px] text-slate-400 mt-1">K3s 节点无法直接访问 GitHub 时填写 HTTP/SOCKS5 代理地址，留空使用全局配置
+                    </p>
+                </div>
                 <!-- Build Command -->
                 <div>
                     <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">构建命令
@@ -551,7 +563,7 @@
                 <div class="flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                     <span class="material-symbols-outlined text-primary text-lg mt-0.5">info</span>
                     <p class="text-xs text-blue-700 leading-relaxed">
-                        流水线将通过 K3s Job 启动 Kaniko 容器，自动克隆代码、构建 Docker 镜像并推送到 Harbor 仓库。
+                        流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、Maven 打包、构建镜像并直接导入 K3s 节点 (不依赖外网)。
                         如果指定了 Deployment 名称，还会自动更新 K3s 集群中的部署。
                     </p>
                 </div>
@@ -605,6 +617,7 @@
                 deploymentName: document.getElementById('formDeployment').value.trim(),
                 dockerfilePath: document.getElementById('formDockerfile').value.trim() || './Dockerfile',
                 gitToken: document.getElementById('formGitToken').value.trim(),
+                gitProxy: document.getElementById('formGitProxy').value.trim(),
                 buildCommand: document.getElementById('formBuildCommand').value.trim()
             };
 
@@ -740,7 +753,7 @@
         }
 
         // ========== Stepper ==========
-        const stepNames = ['代码克隆', 'Maven打包', '镜像构建', '推送Harbor', 'K3s部署', '完成'];
+        const stepNames = ['代码克隆', 'Maven打包', '镜像构建', '导入节点', 'K3s部署', '完成'];
 
         function resetStepper() {
             for (let i = 0; i <= 5; i++) {

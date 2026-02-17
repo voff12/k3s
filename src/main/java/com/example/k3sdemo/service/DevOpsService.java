@@ -51,6 +51,15 @@ public class DevOpsService {
     @Value("${maven.image:maven:3.9-eclipse-temurin-17}")
     private String mavenImage;
 
+    @Value("${loader.image:rancher/k3s:latest}")
+    private String loaderImage;
+
+    @Value("${git.proxy:}")
+    private String globalGitProxy;
+
+    @Value("${local.registry:localhost:5000}")
+    private String localRegistry;
+
     private final Map<String, PipelineRun> pipelineRuns = new ConcurrentHashMap<>();
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
@@ -77,6 +86,10 @@ public class DevOpsService {
         if (!config.hasGitAuth() && globalGitlabToken != null && !globalGitlabToken.isEmpty()) {
             config.setGitToken(globalGitlabToken);
         }
+        // If no per-pipeline proxy, use global git proxy
+        if (!config.hasGitProxy() && globalGitProxy != null && !globalGitProxy.isEmpty()) {
+            config.setGitProxy(globalGitProxy);
+        }
 
         run.addLog("[INFO] 流水线已创建, ID: " + run.getId());
         run.addLog("[INFO] Git仓库: " + config.getGitUrl());
@@ -84,6 +97,9 @@ public class DevOpsService {
         run.addLog("[INFO] 目标镜像: " + config.getFullImageRef(harborHost, harborProject));
         if (config.hasGitAuth()) {
             run.addLog("[INFO] Git认证: 使用 Private Token (GitLab)");
+        }
+        if (config.hasGitProxy()) {
+            run.addLog("[INFO] Git代理: " + config.getGitProxy());
         }
 
         executor.submit(() -> executePipeline(run));
@@ -185,37 +201,60 @@ public class DevOpsService {
                 broadcastLog(run);
             }
 
-            // ========== Step 2: Kaniko image build ==========
+            // ========== Step 3: Kaniko build (init container) ==========
             run.advanceTo(PipelineRun.Status.BUILDING);
             broadcastStatus(run);
-            run.addLog("[INFO] ➜ 步骤3/6: Kaniko 镜像构建...");
+            run.addLog("[INFO] ➜ 步骤3/6: Kaniko 镜像构建 (离线模式)...");
+            run.addLog("[INFO] 基础镜像 mirror: " + localRegistry + " (Dockerfile FROM 重写)");
+            broadcastLog(run);
+
+            // 3a: Wait for rewrite-dockerfile init container
+            boolean rewriteOk = waitForInitContainerAndStreamLogs(client, podName, "rewrite-dockerfile", run);
+            if (!rewriteOk) {
+                diagnoseMainContainerFailure(client, jobName, run);
+                run.fail("Dockerfile 重写失败，请查看日志");
+                broadcastStatus(run);
+                return;
+            }
+
+            // 3b: Wait for kaniko init container
+            boolean kanikoOk = waitForInitContainerAndStreamLogs(client, podName, "kaniko", run);
+            if (!kanikoOk) {
+                diagnoseMainContainerFailure(client, jobName, run);
+                run.fail("Kaniko 构建失败，请查看日志");
+                broadcastStatus(run);
+                // cleanupJob(client, jobName); // Keep for debugging
+                return;
+            }
+
+            // ========== Step 4: Import to K3s (Main container) ==========
+            run.advanceTo(PipelineRun.Status.PUSHING);
+            broadcastStatus(run);
+            run.addLog("[INFO] ➜ 步骤4/6: 导入镜像到 K3s 节点...");
             broadcastLog(run);
 
             boolean podRunning = waitForPodRunning(client, podName, run);
             if (!podRunning) {
-                run.fail("Kaniko 容器启动失败");
+                diagnoseMainContainerFailure(client, jobName, run);
+                run.fail("镜像导入容器启动失败");
                 broadcastStatus(run);
-                cleanupJob(client, jobName);
+                // cleanupJob(client, jobName); // Keep for debugging
                 return;
             }
 
-            // ========== Step 3: Stream Kaniko logs / Push ==========
-            run.advanceTo(PipelineRun.Status.PUSHING);
-            broadcastStatus(run);
-            run.addLog("[INFO] ➜ 步骤4/6: 构建镜像并推送到 Harbor...");
-            broadcastLog(run);
-
-            streamContainerLogs(client, podName, "default", "kaniko", run);
+            // Stream loader logs
+            streamContainerLogs(client, jobName, "default", "loader", run);
 
             boolean success = waitForJobCompletion(client, jobName, run);
             if (!success) {
-                run.fail("Kaniko 构建失败，请查看日志");
+                diagnoseMainContainerFailure(client, jobName, run);
+                run.fail("镜像导入失败，请查看日志");
                 broadcastStatus(run);
-                cleanupJob(client, jobName);
+                // cleanupJob(client, jobName); // Keep for debugging
                 return;
             }
 
-            run.addLog("[INFO] ✓ 镜像构建并推送成功: " + fullImage);
+            run.addLog("[INFO] ✓ 镜像已导入 K3s containerd (离线模式): " + fullImage);
             broadcastLog(run);
 
             // ========== Step 4: Deploy ==========
@@ -237,7 +276,7 @@ public class DevOpsService {
             broadcastStatus(run);
             broadcastLog(run);
 
-            cleanupJob(client, jobName);
+            // cleanupJob(client, jobName); // Keep for debugging
 
         } catch (Exception e) {
             run.fail("流水线异常: " + e.getMessage());
@@ -305,10 +344,6 @@ public class DevOpsService {
                 Pod pod = client.pods().inNamespace("default").withName(podName).get();
                 if (pod == null)
                     return false;
-                if ("Failed".equals(pod.getStatus().getPhase()))
-                    return false;
-
-                // Check init container status
                 String containerState = getInitContainerState(pod, containerName);
 
                 if ("running".equals(containerState) || "terminated".equals(containerState)) {
@@ -335,7 +370,18 @@ public class DevOpsService {
                     if ("terminated".equals(containerState)) {
                         return checkInitContainerSucceeded(client, podName, containerName, run);
                     }
-                } else if ("waiting".equals(containerState)) {
+                }
+
+                // ── Fail Checks (If not terminated yet) ──
+                if ("Failed".equals(pod.getStatus().getPhase()))
+                    return false;
+
+                // ── Layer 4 Fast Fail: Check if ANY init container failed ──
+                if (checkAnyInitContainerFailed(pod, run)) {
+                    return false;
+                }
+
+                if ("waiting".equals(containerState)) {
                     // ── Layer 3: 调度 & 拉镜像防御 ──
                     String reason = getInitContainerWaitingReason(pod, containerName);
                     if (reason != null) {
@@ -460,6 +506,25 @@ public class DevOpsService {
                 }
             }
         } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    private boolean checkAnyInitContainerFailed(Pod pod, PipelineRun run) {
+        var initStatuses = pod.getStatus().getInitContainerStatuses();
+        if (initStatuses != null) {
+            for (var cs : initStatuses) {
+                if (cs.getState() != null && cs.getState().getTerminated() != null) {
+                    int exitCode = cs.getState().getTerminated().getExitCode();
+                    if (exitCode != 0) {
+                        String reason = cs.getState().getTerminated().getReason();
+                        run.addLog(String.format("[ERROR] 检测到前置容器 %s 失败 (exit %d): %s",
+                                cs.getName(), exitCode, reason));
+                        broadcastLog(run);
+                        return true;
+                    }
+                }
+            }
         }
         return false;
     }
@@ -627,7 +692,9 @@ public class DevOpsService {
             }
 
             // Update the first container's image
-            deployment.getSpec().getTemplate().getSpec().getContainers().get(0).setImage(fullImage);
+            var container = deployment.getSpec().getTemplate().getSpec().getContainers().get(0);
+            container.setImage(fullImage);
+            container.setImagePullPolicy("IfNotPresent"); // Force local image usage
 
             client.apps().deployments().inNamespace(ns).resource(deployment).update();
             run.addLog("[INFO] ✓ Deployment 已更新: " + deployName + " -> " + fullImage);
@@ -672,9 +739,25 @@ public class DevOpsService {
             cloneUrl = config.getGitUrl();
         }
 
-        String cloneCommand = String.format(
-                "apk add --no-cache git && git clone --depth 1 --branch %s %s /workspace && echo '[INFO] Clone completed successfully'",
-                config.getBranch(), cloneUrl);
+        // 构建 clone 命令: 代理 + 超时 + 阿里云 Alpine 源
+        StringBuilder cloneCmdBuilder = new StringBuilder();
+        cloneCmdBuilder.append("sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && ");
+        cloneCmdBuilder.append("apk add --no-cache git && ");
+        cloneCmdBuilder.append("git config --global http.version HTTP/1.1 && ");
+        cloneCmdBuilder.append("git config --global http.lowSpeedLimit 1000 && ");
+        cloneCmdBuilder.append("git config --global http.lowSpeedTime 30 && ");
+        if (config.hasGitProxy()) {
+            cloneCmdBuilder.append("git config --global http.proxy ").append(config.getGitProxy()).append(" && ");
+            cloneCmdBuilder.append("git config --global https.proxy ").append(config.getGitProxy()).append(" && ");
+            cloneCmdBuilder.append("echo '[INFO] 已配置 Git 代理: ").append(config.getGitProxy()).append("' && ");
+        }
+        cloneCmdBuilder.append(String.format(
+                "git clone --depth 1 --branch %s %s /workspace && " +
+                        "echo '[INFO] Clone completed successfully' && " +
+                        "echo '=== 下载成功，文件列表: ===' && " +
+                        "ls -la /workspace",
+                config.getBranch(), cloneUrl));
+        String cloneCommand = cloneCmdBuilder.toString();
 
         // Start building the Job
         var jobBuilder = new JobBuilder()
@@ -687,11 +770,25 @@ public class DevOpsService {
                 .withBackoffLimit(0)
                 .withNewTemplate()
                 .withNewSpec()
+                .withHostNetwork(true) // 允许访问宿主机 localhost:5000
+                .withDnsPolicy("ClusterFirstWithHostNet")
                 .withRestartPolicy("Never")
+                // Init container 0: Registry check
+                .addNewInitContainer()
+                .withName("registry-check")
+                .withImage(gitImage) // Use gitImage (alpine)
+                .withImagePullPolicy("IfNotPresent")
+                .withCommand("sh", "-c", "echo '[INFO] Checking local registry...' && " +
+                        "sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && " +
+                        "apk add --no-cache curl && " +
+                        "curl -f -v --connect-timeout 5 http://" + localRegistry + "/v2/ && " +
+                        "echo '[INFO] Local registry is reachable'")
+                .endInitContainer()
                 // Init container 1: Git clone
                 .addNewInitContainer()
                 .withName("git-clone")
                 .withImage(gitImage)
+                .withImagePullPolicy("IfNotPresent")
                 .withCommand("sh", "-c", cloneCommand)
                 .addNewVolumeMount()
                 .withName("workspace")
@@ -702,12 +799,17 @@ public class DevOpsService {
         // Init container 2: Maven build (optional)
         if (config.hasBuildStep()) {
             String mvnCommand = String.format(
-                    "cd /workspace && %s && echo '[INFO] Build completed successfully'",
+                    "cd /workspace && " +
+                            "echo '<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd\"><mirrors><mirror><id>aliyunmaven</id><mirrorOf>*</mirrorOf><name>阿里云公共仓库</name><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>' > settings.xml && "
+                            +
+                            "%s -s settings.xml && " +
+                            "echo '[INFO] Build completed successfully'",
                     config.getBuildCommand());
             jobBuilder = jobBuilder
                     .addNewInitContainer()
                     .withName("maven-build")
                     .withImage(mavenImage)
+                    .withImagePullPolicy("IfNotPresent")
                     .withCommand("sh", "-c", mvnCommand)
                     .addNewVolumeMount()
                     .withName("workspace")
@@ -720,24 +822,112 @@ public class DevOpsService {
                     .endInitContainer();
         }
 
-        // Main container: Kaniko builds from /workspace
-        return jobBuilder
-                .addNewContainer()
-                .withName("kaniko")
-                .withImage(kanikoImage)
-                .withArgs(
-                        "--dockerfile=" + config.getDockerfilePath(),
-                        "--context=dir:///workspace",
-                        "--destination=" + fullImage,
-                        "--insecure",
-                        "--skip-tls-verify")
-                .addNewVolumeMount()
-                .withName("docker-config")
-                .withMountPath("/kaniko/.docker")
-                .endVolumeMount()
+        // Init container 3: 智能 Dockerfile 处理
+        // 1) 重写 FROM 指向 localhost:5000
+        // 2) 验证基础镜像是否在 localhost:5000 中存在
+        // 3) 如果不存在，自动生成基于 eclipse-temurin:17-jdk-jammy 的 Dockerfile (已预热)
+        String dockerfilePath = config.getDockerfilePath();
+        String dfFile = dockerfilePath.startsWith("./") ? dockerfilePath.substring(2) : dockerfilePath;
+        String rewriteCmd = String.format(
+                "set -e && " +
+                "REGISTRY='%s' && " +
+                "DF='/workspace/%s' && " +
+                // 安装 curl (用于检查 registry)
+                "sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && " +
+                "apk add --no-cache curl > /dev/null 2>&1 && " +
+                // 提取原始 FROM 镜像名
+                "ORIG_IMAGE=$(grep -i '^FROM ' \"$DF\" | head -1 | awk '{print $2}') && " +
+                "echo \"[INFO] 原始基础镜像: $ORIG_IMAGE\" && " +
+                // 步骤1: 重写 FROM 指向本地 registry
+                "sed -i 's|^FROM docker\\.io/|FROM '\"$REGISTRY\"'/|; s|^FROM library/|FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
+                "sed -i '/^FROM [^/]*$/s|^FROM |FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
+                // 步骤2: 提取重写后的镜像名，检查是否在 registry 中存在
+                "NEW_IMAGE=$(grep -i '^FROM ' \"$DF\" | head -1 | awk '{print $2}') && " +
+                "echo \"[INFO] 重写后基础镜像: $NEW_IMAGE\" && " +
+                // 解析 repo 和 tag 用于 registry API 查询
+                "REPO=$(echo \"$NEW_IMAGE\" | sed \"s|^$REGISTRY/||\" | cut -d: -f1) && " +
+                "TAG=$(echo \"$NEW_IMAGE\" | grep ':' | sed 's/.*://') && " +
+                "TAG=${TAG:-latest} && " +
+                "echo \"[INFO] 检查 $REGISTRY 中是否存在 $REPO:$TAG ...\" && " +
+                "if curl -sf \"http://$REGISTRY/v2/$REPO/tags/list\" 2>/dev/null | grep -q \"$TAG\"; then " +
+                "  echo '[INFO] ✓ 基础镜像存在于本地 Registry, 使用重写后的 Dockerfile' && " +
+                "  cat \"$DF\"; " +
+                "else " +
+                "  echo '[WARN] ✗ 基础镜像不在本地 Registry, 自动生成 Dockerfile (fallback)' && " +
+                // 自动寻找 maven 构建产物 jar
+                "  JAR=$(find /workspace/target -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' 2>/dev/null | head -1) && " +
+                "  if [ -z \"$JAR\" ]; then " +
+                "    JAR=$(find /workspace -path '*/target/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' 2>/dev/null | head -1); " +
+                "  fi && " +
+                "  if [ -z \"$JAR\" ]; then " +
+                "    echo '[ERROR] 找不到 JAR 文件, 无法生成 Dockerfile' && exit 1; " +
+                "  fi && " +
+                "  REL_JAR=$(echo \"$JAR\" | sed 's|^/workspace/||') && " +
+                "  echo \"[INFO] 发现 JAR: $REL_JAR\" && " +
+                // 生成标准 Spring Boot Dockerfile
+                "  printf 'FROM %%s/library/eclipse-temurin:17-jdk-jammy\\n" +
+                "WORKDIR /app\\n" +
+                "COPY %%s app.jar\\n" +
+                "EXPOSE 8080\\n" +
+                "ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]\\n' " +
+                "\"$REGISTRY\" \"$REL_JAR\" > \"$DF\" && " +
+                "  echo '[INFO] ✓ 已生成 Dockerfile:' && cat \"$DF\"; " +
+                "fi",
+                localRegistry, dfFile);
+        jobBuilder = jobBuilder
+                .addNewInitContainer()
+                .withName("rewrite-dockerfile")
+                .withImage(gitImage)
+                .withImagePullPolicy("IfNotPresent")
+                .withCommand("sh", "-c", rewriteCmd)
                 .addNewVolumeMount()
                 .withName("workspace")
                 .withMountPath("/workspace")
+                .endVolumeMount()
+                .endInitContainer();
+
+        // Init container 4: Kaniko (build to tar, 离线模式)
+        // 旧版 kaniko 仅支持: --insecure, --skip-tls-verify, --no-push, --tarPath 等基础参数
+        jobBuilder = jobBuilder
+                .addNewInitContainer()
+                .withName("kaniko")
+                .withImage(kanikoImage)
+                .withImagePullPolicy("IfNotPresent")
+                .withArgs(
+                        "--dockerfile=" + config.getDockerfilePath(),
+                        "--context=dir:///workspace",
+                        "--no-push",
+                        "--tarPath=/workspace/image.tar",
+                        "--destination=" + fullImage,
+                        "--insecure",
+                        "--skip-tls-verify",
+                        "--cache=false")
+                .addNewVolumeMount()
+                .withName("workspace")
+                .withMountPath("/workspace")
+                .endVolumeMount()
+                .endInitContainer();
+
+        // ... (existing code)
+
+        // Main container: Image Loader (imports tar to K3s)
+        return jobBuilder
+                .addNewContainer()
+                .withName("loader")
+                .withImage(loaderImage)
+                .withImagePullPolicy("IfNotPresent")
+                .withCommand("ctr", "-a", "/run/k3s/containerd/containerd.sock", "-n", "k8s.io", "images", "import",
+                        "/workspace/image.tar")
+                .withNewSecurityContext()
+                .withPrivileged(true)
+                .endSecurityContext()
+                .addNewVolumeMount()
+                .withName("workspace")
+                .withMountPath("/workspace")
+                .endVolumeMount()
+                .addNewVolumeMount()
+                .withName("k3s-sock")
+                .withMountPath("/run/k3s/containerd/containerd.sock")
                 .endVolumeMount()
                 .endContainer()
                 // Volumes
@@ -745,6 +935,7 @@ public class DevOpsService {
                 .withName("docker-config")
                 .withNewSecret()
                 .withSecretName("harbor-registry-secret")
+                .withOptional(true)
                 .addNewItem()
                 .withKey(".dockerconfigjson")
                 .withPath("config.json")
@@ -755,6 +946,12 @@ public class DevOpsService {
                 .withName("workspace")
                 .withNewEmptyDir()
                 .endEmptyDir()
+                .endVolume()
+                .addNewVolume()
+                .withName("k3s-sock")
+                .withNewHostPath()
+                .withPath("/run/k3s/containerd/containerd.sock")
+                .endHostPath()
                 .endVolume()
                 .addNewVolume()
                 .withName("maven-repo")
@@ -809,27 +1006,96 @@ public class DevOpsService {
     /**
      * ── Layer 4: Diagnose main (kaniko) container failure ──
      */
+    /**
+     * ── Layer 4: Diagnose Job/Pod failure (Detailed) ──
+     */
     private void diagnoseMainContainerFailure(KubernetesClient client, String jobName, PipelineRun run) {
         try {
             List<Pod> pods = client.pods().inNamespace("default")
                     .withLabel("job-name", jobName).list().getItems();
-            if (!pods.isEmpty()) {
-                Pod pod = pods.get(0);
-                var statuses = pod.getStatus().getContainerStatuses();
-                if (statuses != null) {
-                    for (var cs : statuses) {
-                        if (cs.getState() != null && cs.getState().getTerminated() != null) {
-                            var terminated = cs.getState().getTerminated();
-                            int exitCode = terminated.getExitCode();
-                            String reason = terminated.getReason();
-                            String diagnosis = diagnoseExitCode(exitCode, reason);
-                            run.addLog("[ERROR] " + cs.getName() + " 失败 (exit=" + exitCode + "): " + diagnosis);
+            if (pods.isEmpty()) {
+                run.addLog("[ERROR] 找不到 Job 对应的 Pod: " + jobName);
+                broadcastLog(run);
+                return;
+            }
+            Pod pod = pods.get(0);
+            String podName = pod.getMetadata().getName();
+
+            run.addLog("=== 错误诊断报告 (" + podName + ") ===");
+
+            // 1. Events
+            String events = parsePodEvents(client, podName);
+            if (events != null && !events.isEmpty()) {
+                run.addLog("📋 Pod 事件:\n" + events);
+            }
+
+            // 2. Init Containers
+            var initStatuses = pod.getStatus().getInitContainerStatuses();
+            if (initStatuses != null) {
+                for (var cs : initStatuses) {
+                    diagnoseContainerStatus(client, podName, cs, run);
+                }
+            }
+
+            // 3. Main Containers
+            var statuses = pod.getStatus().getContainerStatuses();
+            if (statuses != null) {
+                for (var cs : statuses) {
+                    diagnoseContainerStatus(client, podName, cs, run);
+                }
+            }
+
+            // 4. Pod Conditions
+            String condition = parsePodConditions(pod);
+            if (condition != null) {
+                run.addLog("⚠️ Pod 状态条件异常: " + condition);
+            }
+
+            broadcastLog(run);
+        } catch (Exception e) {
+            run.addLog("[ERROR] 诊断失败: " + e.getMessage());
+            broadcastLog(run);
+        }
+    }
+
+    private void diagnoseContainerStatus(KubernetesClient client, String podName, ContainerStatus cs, PipelineRun run) {
+        if (cs.getState() != null) {
+            var state = cs.getState();
+            if (state.getTerminated() != null) {
+                var term = state.getTerminated();
+                int exitCode = term.getExitCode();
+                if (exitCode != 0) {
+                    run.addLog(String.format("❌ 容器 [%s] 失败 (exit code %d): %s",
+                            cs.getName(), exitCode, term.getReason()));
+                    if (term.getMessage() != null) {
+                        run.addLog("   消息: " + term.getMessage());
+                    }
+                    run.addLog("   建议: " + diagnoseExitCode(exitCode, term.getReason()));
+
+                    // Fetch logs for failed container
+                    try {
+                        String logs = client.pods().inNamespace("default").withName(podName)
+                                .inContainer(cs.getName()).tailingLines(20).getLog();
+                        if (logs != null && !logs.isEmpty()) {
+                            run.addLog("🔍 容器 [" + cs.getName() + "] 错误日志 (Last 20 lines):\n" + logs);
+                        } else {
+                            run.addLog("🔍 容器 [" + cs.getName() + "] 无日志输出");
                         }
+                    } catch (Exception e) {
+                        run.addLog("   (无法获取容器日志: " + e.getMessage() + ")");
                     }
                 }
-                broadcastLog(run);
+            } else if (state.getWaiting() != null) {
+                var wait = state.getWaiting();
+                String reason = wait.getReason();
+                if (!"PodInitializing".equals(reason) && !"ContainerCreating".equals(reason)) {
+                    run.addLog(String.format("⚠️ 容器 [%s] 异常等待: %s",
+                            cs.getName(), reason));
+                    if (wait.getMessage() != null) {
+                        run.addLog("   消息: " + wait.getMessage());
+                    }
+                }
             }
-        } catch (Exception ignored) {
         }
     }
 

@@ -14,6 +14,7 @@ public class PipelineConfig {
     private String dockerfilePath = "./Dockerfile";
     private String gitToken;
     private String buildCommand = "mvn clean package -DskipTests";
+    private String gitProxy; // HTTP 代理, 例如 http://127.0.0.1:7890
 
     public PipelineConfig() {
     }
@@ -107,11 +108,26 @@ public class PipelineConfig {
         return buildCommand != null && !buildCommand.isEmpty();
     }
 
+    public String getGitProxy() {
+        return gitProxy;
+    }
+
+    public void setGitProxy(String gitProxy) {
+        this.gitProxy = gitProxy;
+    }
+
     /**
-     * Returns the full image reference including Harbor host, e.g.
-     * harbor.local/library/myapp:latest
+     * Check if this pipeline uses a Git HTTP proxy.
+     */
+    public boolean hasGitProxy() {
+        return gitProxy != null && !gitProxy.isEmpty();
+    }
+
+    /**
+     * Returns the full image reference.
+     * 离线模式: 直接使用 imageName:tag (本地 ctr import, 不需要 Harbor 前缀)
      */
     public String getFullImageRef(String harborHost, String harborProject) {
-        return harborHost + "/" + harborProject + "/" + imageName + ":" + imageTag;
+        return imageName + ":" + imageTag;
     }
 }

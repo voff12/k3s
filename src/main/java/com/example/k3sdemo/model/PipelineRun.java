@@ -17,7 +17,7 @@ public class PipelineRun {
         CLONING("代码克隆"),
         PACKAGING("Maven打包"),
         BUILDING("镜像构建"),
-        PUSHING("镜像推送"),
+        PUSHING("导入节点"),
         DEPLOYING("K3s部署"),
         SUCCESS("成功"),
         FAILED("失败");
