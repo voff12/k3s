@@ -28,3 +28,4 @@ build/
 target/
 *.tar
 .DS_Store
+k3s.tar
