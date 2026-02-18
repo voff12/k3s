@@ -782,54 +782,51 @@ public class DevOpsService {
         String dfFile = dockerfilePath.startsWith("./") ? dockerfilePath.substring(2) : dockerfilePath;
         String buildCmd = config.hasBuildStep() ? config.getBuildCommand() : "mvn clean package -DskipTests";
 
+        // 使用 printf 生成 Dockerfile (兼容 sh -c 单行执行)
         String rewriteCmd = String.format(
-                "set -e && " +
                 "REGISTRY='%s' && " +
                 "DF='/workspace/%s' && " +
                 "BUILD_CMD='%s' && " +
-                // 安装 curl (用于检查 registry)
+                // 安装 curl
                 "sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && " +
                 "apk add --no-cache curl > /dev/null 2>&1 && " +
-                // 读取原始 Dockerfile 的 FROM
-                "ORIG_IMAGE=$(grep -i '^FROM ' \"$DF\" | head -1 | awk '{print $2}') && " +
-                "echo \"[INFO] 原始基础镜像: $ORIG_IMAGE\" && " +
-                // 检查所有 FROM 基础镜像是否都在 localhost:5000 中可用
-                "ALL_AVAILABLE=true && " +
-                "for IMG in $(grep -i '^FROM ' \"$DF\" | awk '{print $2}'); do " +
-                "  CLEAN_IMG=$(echo \"$IMG\" | sed 's|^docker\\.io/||; s|^library/||') && " +
-                "  REPO=\"library/${CLEAN_IMG%%:*}\" && " +
-                "  TAG=\"${CLEAN_IMG##*:}\" && " +
-                "  if ! curl -sf \"http://$REGISTRY/v2/$REPO/tags/list\" 2>/dev/null | grep -q \"$TAG\"; then " +
-                "    echo \"[WARN] 镜像 $IMG 不在 $REGISTRY 中\" && " +
-                "    ALL_AVAILABLE=false; " +
-                "  fi; " +
-                "done && " +
-                // 如果所有基础镜像都可用, 仅重写 FROM 指向本地 registry
+                // 检查 Dockerfile 是否存在
+                "if [ ! -f \"$DF\" ]; then " +
+                "  echo '[WARN] Dockerfile 不存在, 将直接生成多阶段 Dockerfile'; " +
+                "  ALL_AVAILABLE=false; " +
+                "else " +
+                // 检查所有 FROM 基础镜像是否在本地 registry 中
+                "  ALL_AVAILABLE=true && " +
+                "  for IMG in $(grep -i '^FROM ' \"$DF\" | awk '{print $2}'); do " +
+                "    CLEAN_IMG=$(echo \"$IMG\" | sed 's|^docker\\.io/||; s|^library/||') && " +
+                "    REPO=\"library/${CLEAN_IMG%%%%:*}\" && " +
+                "    TAG=\"${CLEAN_IMG##*:}\" && " +
+                "    if ! curl -sf \"http://$REGISTRY/v2/$REPO/tags/list\" 2>/dev/null | grep -q \"$TAG\"; then " +
+                "      echo \"[WARN] 镜像 $IMG 不在 $REGISTRY 中\" && " +
+                "      ALL_AVAILABLE=false; " +
+                "    fi; " +
+                "  done; " +
+                "fi && " +
+                // 分支: 基础镜像可用 → 重写 FROM; 不可用 → 生成多阶段 Dockerfile
                 "if [ \"$ALL_AVAILABLE\" = 'true' ]; then " +
                 "  echo '[INFO] ✓ 所有基础镜像均在本地 Registry, 重写 FROM' && " +
                 "  sed -i 's|^FROM docker\\.io/|FROM '\"$REGISTRY\"'/|; s|^FROM library/|FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
                 "  sed -i '/^FROM [^/]*$/s|^FROM |FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
-                "  cat \"$DF\"; " +
+                "  echo '[INFO] 重写后 Dockerfile:' && cat \"$DF\"; " +
                 "else " +
-                // 生成多阶段 Dockerfile (Maven 打包 + 运行)
                 "  echo '[INFO] 生成多阶段 Dockerfile (Maven 打包 + 镜像构建一体化)' && " +
                 "  SETTINGS='<settings><mirrors><mirror><id>aliyun</id><mirrorOf>*</mirrorOf><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>' && " +
-                "  cat > \"$DF\" << 'DEOF'\n" +
-                "# ===== Stage 1: Maven Build =====\n" +
-                "FROM $REGISTRY/library/maven:3.9-eclipse-temurin-17 AS builder\n" +
-                "WORKDIR /build\n" +
-                "COPY . .\n" +
-                "RUN echo '$SETTINGS' > /root/.m2/settings.xml && $BUILD_CMD\n" +
-                "\n" +
-                "# ===== Stage 2: Runtime =====\n" +
-                "FROM $REGISTRY/library/eclipse-temurin:17-jdk-jammy\n" +
-                "WORKDIR /app\n" +
-                "COPY --from=builder /build/target/*.jar app.jar\n" +
-                "EXPOSE 8080\n" +
-                "ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]\n" +
-                "DEOF\n" +
-                // 用 sed 替换 heredoc 中的变量 (heredoc 用了单引号不会展开)
-                "  sed -i \"s|\\$REGISTRY|$REGISTRY|g; s|\\$SETTINGS|$SETTINGS|g; s|\\$BUILD_CMD|$BUILD_CMD|g\" \"$DF\" && " +
+                "  printf 'FROM %%s/library/maven:3.9-eclipse-temurin-17 AS builder\\n" +
+                "WORKDIR /build\\n" +
+                "COPY . .\\n" +
+                "RUN mkdir -p /root/.m2 && echo '\\''%%s'\\'' > /root/.m2/settings.xml && %%s\\n" +
+                "\\n" +
+                "FROM %%s/library/eclipse-temurin:17-jdk-jammy\\n" +
+                "WORKDIR /app\\n" +
+                "COPY --from=builder /build/target/*.jar app.jar\\n" +
+                "EXPOSE 8080\\n" +
+                "ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]\\n' " +
+                "\"$REGISTRY\" \"$SETTINGS\" \"$BUILD_CMD\" \"$REGISTRY\" > \"$DF\" && " +
                 "  echo '[INFO] ✓ 已生成多阶段 Dockerfile:' && cat \"$DF\"; " +
                 "fi",
                 localRegistry, dfFile, buildCmd);
