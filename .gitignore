@@ -27,3 +27,4 @@ replay_pid*
 build/
 target/
 *.tar
+.DS_Store
