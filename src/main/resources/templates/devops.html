@@ -208,59 +208,48 @@
                                         <p class="text-[10px] text-slate-400" id="step0label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 1: Maven Build -->
+                                <!-- Step 1: Multi-stage Build (Maven + Image) -->
                                 <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="1">
                                     <div id="step1"
-                                        class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
-                                        <span class="material-symbols-outlined">package_2</span>
-                                    </div>
-                                    <div class="text-center">
-                                        <p class="text-xs font-bold">Maven打包</p>
-                                        <p class="text-[10px] text-slate-400" id="step1label">等待中</p>
-                                    </div>
-                                </div>
-                                <!-- Step 2: Image Build -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="2">
-                                    <div id="step2"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">build</span>
                                     </div>
                                     <div class="text-center">
-                                        <p class="text-xs font-bold">镜像构建</p>
-                                        <p class="text-[10px] text-slate-400" id="step2label">等待中</p>
+                                        <p class="text-xs font-bold">多阶段构建</p>
+                                        <p class="text-[10px] text-slate-400" id="step1label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 3: Push -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="3">
-                                    <div id="step3"
+                                <!-- Step 2: Import to Node -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="2">
+                                    <div id="step2"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">download_for_offline</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">导入节点</p>
-                                        <p class="text-[10px] text-slate-400" id="step3label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step2label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 4: Deploy -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="4">
-                                    <div id="step4"
+                                <!-- Step 3: Deploy -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="3">
+                                    <div id="step3"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">rocket_launch</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">K3s 部署</p>
-                                        <p class="text-[10px] text-slate-400" id="step4label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step3label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 5: Complete -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="5">
-                                    <div id="step5"
+                                <!-- Step 4: Complete -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="4">
+                                    <div id="step4"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">check_circle</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">完成</p>
-                                        <p class="text-[10px] text-slate-400" id="step5label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step4label">等待中</p>
                                     </div>
                                 </div>
                             </div>
@@ -556,14 +545,14 @@
                             placeholder="留空则跳过打包步骤"
                             class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono" />
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-1">在 Docker 镜像构建前执行的打包命令，留空则跳过此步骤
+                    <p class="text-[11px] text-slate-400 mt-1">多阶段 Dockerfile 中 Maven 构建命令，留空则使用默认命令
                     </p>
                 </div>
                 <!-- Hint -->
                 <div class="flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                     <span class="material-symbols-outlined text-primary text-lg mt-0.5">info</span>
                     <p class="text-xs text-blue-700 leading-relaxed">
-                        流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、Maven 打包、构建镜像并直接导入 K3s 节点 (不依赖外网)。
+                        流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、多阶段构建 (Maven 打包 + 镜像构建一体化) 并直接导入 K3s 节点 (不依赖外网)。
                         如果指定了 Deployment 名称，还会自动更新 K3s 集群中的部署。
                     </p>
                 </div>
@@ -781,8 +770,8 @@
                 document.getElementById('pipelineDuration').textContent = duration;
             }
 
-            // Update stepper (6 steps: 0-5)
-            for (let i = 0; i <= 5; i++) {
+            // Update stepper (5 steps: 0-4)
+            for (let i = 0; i <= 4; i++) {
                 const el = document.getElementById('step' + i);
                 const labelEl = document.getElementById('step' + i + 'label');
 
@@ -813,8 +802,8 @@
                 }
             }
 
-            // Update progress bar (6 steps → each ~16.7%)
-            const progressPercent = Math.min(step * 16.7 + (finished ? 16.7 : 0), 84);
+            // Update progress bar (5 steps → each 20%)
+            const progressPercent = Math.min(step * 20 + (finished ? 20 : 0), 100);
             document.getElementById('stepperProgress').style.width = progressPercent + '%';
         }
 

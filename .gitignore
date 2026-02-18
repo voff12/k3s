@@ -30,3 +30,5 @@ target/
 .DS_Store
 k3s.tar
 *.img
+.idea
+.vscode

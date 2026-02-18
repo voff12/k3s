@@ -119,7 +119,7 @@ public class DevOpsService {
             // ========== Create Job upfront during Clone step ==========
             run.advanceTo(PipelineRun.Status.CLONING);
             broadcastStatus(run);
-            run.addLog("[INFO] ➜ 步骤1/6: 代码克隆...");
+            run.addLog("[INFO] ➜ 步骤1/5: 代码克隆...");
             if (config.hasGitAuth()) {
                 run.addLog("[INFO] 使用 Git Token 认证克隆私有仓库: " + config.getGitUrl());
             } else {
@@ -177,60 +177,35 @@ public class DevOpsService {
             run.addLog("[INFO] ✓ 代码克隆完成");
             broadcastLog(run);
 
-            // ========== Step 1: Maven Build ==========
-            if (config.hasBuildStep()) {
-                run.advanceTo(PipelineRun.Status.PACKAGING);
-                broadcastStatus(run);
-                run.addLog("[INFO] ➜ 步骤2/6: Maven 打包构建...");
-                run.addLog("[INFO] 构建命令: " + config.getBuildCommand());
-                broadcastLog(run);
-
-                boolean buildOk = waitForInitContainerAndStreamLogs(client, podName, "maven-build", run);
-                if (!buildOk) {
-                    run.fail("Maven 打包失败，请查看日志");
-                    broadcastStatus(run);
-                    cleanupJob(client, jobName);
-                    return;
-                }
-                run.addLog("[INFO] ✓ Maven 打包完成");
-                broadcastLog(run);
-            } else {
-                run.advanceTo(PipelineRun.Status.PACKAGING);
-                broadcastStatus(run);
-                run.addLog("[INFO] ➜ 步骤2/6: 跳过打包步骤 (无构建命令)");
-                broadcastLog(run);
-            }
-
-            // ========== Step 3: Kaniko build (init container) ==========
+            // ========== Step 2: Kaniko 多阶段构建 (Maven打包 + 镜像构建一体化) ==========
             run.advanceTo(PipelineRun.Status.BUILDING);
             broadcastStatus(run);
-            run.addLog("[INFO] ➜ 步骤3/6: Kaniko 镜像构建 (离线模式)...");
-            run.addLog("[INFO] 基础镜像 mirror: " + localRegistry + " (Dockerfile FROM 重写)");
+            run.addLog("[INFO] ➜ 步骤2/5: Kaniko 多阶段构建 (Maven 打包 + 镜像构建)...");
+            run.addLog("[INFO] 基础镜像源: " + localRegistry + " (多阶段 Dockerfile 自动生成)");
             broadcastLog(run);
 
-            // 3a: Wait for rewrite-dockerfile init container
+            // 2a: Wait for rewrite-dockerfile init container (生成多阶段 Dockerfile)
             boolean rewriteOk = waitForInitContainerAndStreamLogs(client, podName, "rewrite-dockerfile", run);
             if (!rewriteOk) {
                 diagnoseMainContainerFailure(client, jobName, run);
-                run.fail("Dockerfile 重写失败，请查看日志");
+                run.fail("Dockerfile 生成失败，请查看日志");
                 broadcastStatus(run);
                 return;
             }
 
-            // 3b: Wait for kaniko init container
+            // 2b: Wait for kaniko init container (执行多阶段构建)
             boolean kanikoOk = waitForInitContainerAndStreamLogs(client, podName, "kaniko", run);
             if (!kanikoOk) {
                 diagnoseMainContainerFailure(client, jobName, run);
                 run.fail("Kaniko 构建失败，请查看日志");
                 broadcastStatus(run);
-                // cleanupJob(client, jobName); // Keep for debugging
                 return;
             }
 
-            // ========== Step 4: Import to K3s (Main container) ==========
+            // ========== Step 3: Import to K3s (Main container) ==========
             run.advanceTo(PipelineRun.Status.PUSHING);
             broadcastStatus(run);
-            run.addLog("[INFO] ➜ 步骤4/6: 导入镜像到 K3s 节点...");
+            run.addLog("[INFO] ➜ 步骤3/5: 导入镜像到 K3s 节点...");
             broadcastLog(run);
 
             boolean podRunning = waitForPodRunning(client, podName, run);
@@ -260,7 +235,7 @@ public class DevOpsService {
             // ========== Step 4: Deploy ==========
             run.advanceTo(PipelineRun.Status.DEPLOYING);
             broadcastStatus(run);
-            run.addLog("[INFO] ➜ 步骤5/6: 部署到 K3s 集群...");
+            run.addLog("[INFO] ➜ 步骤4/5: 部署到 K3s 集群...");
             broadcastLog(run);
 
             if (config.getDeploymentName() != null && !config.getDeploymentName().isEmpty()) {
@@ -721,7 +696,9 @@ public class DevOpsService {
 
     /**
      * Build the Kaniko Job spec.
-     * Always uses init containers: git-clone (+ optional maven-build), then Kaniko.
+     * Init containers: registry-check → git-clone → rewrite-dockerfile → kaniko
+     * Main container: loader (import tar to K3s containerd)
+     * Maven 打包通过多阶段 Dockerfile 在 Kaniko 内完成，不再需要单独的 maven-build 容器。
      */
     private Job buildKanikoJob(String jobName, String pipelineId, PipelineConfig config, String fullImage) {
         // Build git clone command
@@ -796,84 +773,66 @@ public class DevOpsService {
                 .endVolumeMount()
                 .endInitContainer();
 
-        // Init container 2: Maven build (optional)
-        if (config.hasBuildStep()) {
-            String mvnCommand = String.format(
-                    "cd /workspace && " +
-                            "echo '<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd\"><mirrors><mirror><id>aliyunmaven</id><mirrorOf>*</mirrorOf><name>阿里云公共仓库</name><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>' > settings.xml && "
-                            +
-                            "%s -s settings.xml && " +
-                            "echo '[INFO] Build completed successfully'",
-                    config.getBuildCommand());
-            jobBuilder = jobBuilder
-                    .addNewInitContainer()
-                    .withName("maven-build")
-                    .withImage(mavenImage)
-                    .withImagePullPolicy("IfNotPresent")
-                    .withCommand("sh", "-c", mvnCommand)
-                    .addNewVolumeMount()
-                    .withName("workspace")
-                    .withMountPath("/workspace")
-                    .endVolumeMount()
-                    .addNewVolumeMount()
-                    .withName("maven-repo")
-                    .withMountPath("/root/.m2")
-                    .endVolumeMount()
-                    .endInitContainer();
-        }
-
-        // Init container 3: 智能 Dockerfile 处理
-        // 1) 重写 FROM 指向 localhost:5000
-        // 2) 验证基础镜像是否在 localhost:5000 中存在
-        // 3) 如果不存在，自动生成基于 eclipse-temurin:17-jdk-jammy 的 Dockerfile (已预热)
+        // Init container 2: 智能 Dockerfile 处理 (多阶段构建)
+        // 统一生成多阶段 Dockerfile:
+        //   阶段1 (builder): Maven 打包 — 基于 maven:3.9-eclipse-temurin-17
+        //   阶段2 (runtime): 仅 COPY jar 运行 — 基于 eclipse-temurin:17-jdk-jammy
+        // 这样 maven-build init container 不再需要, Kaniko 一步完成打包+构建
         String dockerfilePath = config.getDockerfilePath();
         String dfFile = dockerfilePath.startsWith("./") ? dockerfilePath.substring(2) : dockerfilePath;
+        String buildCmd = config.hasBuildStep() ? config.getBuildCommand() : "mvn clean package -DskipTests";
+
         String rewriteCmd = String.format(
                 "set -e && " +
                 "REGISTRY='%s' && " +
                 "DF='/workspace/%s' && " +
+                "BUILD_CMD='%s' && " +
                 // 安装 curl (用于检查 registry)
                 "sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && " +
                 "apk add --no-cache curl > /dev/null 2>&1 && " +
-                // 提取原始 FROM 镜像名
+                // 读取原始 Dockerfile 的 FROM
                 "ORIG_IMAGE=$(grep -i '^FROM ' \"$DF\" | head -1 | awk '{print $2}') && " +
                 "echo \"[INFO] 原始基础镜像: $ORIG_IMAGE\" && " +
-                // 步骤1: 重写 FROM 指向本地 registry
-                "sed -i 's|^FROM docker\\.io/|FROM '\"$REGISTRY\"'/|; s|^FROM library/|FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
-                "sed -i '/^FROM [^/]*$/s|^FROM |FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
-                // 步骤2: 提取重写后的镜像名，检查是否在 registry 中存在
-                "NEW_IMAGE=$(grep -i '^FROM ' \"$DF\" | head -1 | awk '{print $2}') && " +
-                "echo \"[INFO] 重写后基础镜像: $NEW_IMAGE\" && " +
-                // 解析 repo 和 tag 用于 registry API 查询
-                "REPO=$(echo \"$NEW_IMAGE\" | sed \"s|^$REGISTRY/||\" | cut -d: -f1) && " +
-                "TAG=$(echo \"$NEW_IMAGE\" | grep ':' | sed 's/.*://') && " +
-                "TAG=${TAG:-latest} && " +
-                "echo \"[INFO] 检查 $REGISTRY 中是否存在 $REPO:$TAG ...\" && " +
-                "if curl -sf \"http://$REGISTRY/v2/$REPO/tags/list\" 2>/dev/null | grep -q \"$TAG\"; then " +
-                "  echo '[INFO] ✓ 基础镜像存在于本地 Registry, 使用重写后的 Dockerfile' && " +
+                // 检查所有 FROM 基础镜像是否都在 localhost:5000 中可用
+                "ALL_AVAILABLE=true && " +
+                "for IMG in $(grep -i '^FROM ' \"$DF\" | awk '{print $2}'); do " +
+                "  CLEAN_IMG=$(echo \"$IMG\" | sed 's|^docker\\.io/||; s|^library/||') && " +
+                "  REPO=\"library/${CLEAN_IMG%%:*}\" && " +
+                "  TAG=\"${CLEAN_IMG##*:}\" && " +
+                "  if ! curl -sf \"http://$REGISTRY/v2/$REPO/tags/list\" 2>/dev/null | grep -q \"$TAG\"; then " +
+                "    echo \"[WARN] 镜像 $IMG 不在 $REGISTRY 中\" && " +
+                "    ALL_AVAILABLE=false; " +
+                "  fi; " +
+                "done && " +
+                // 如果所有基础镜像都可用, 仅重写 FROM 指向本地 registry
+                "if [ \"$ALL_AVAILABLE\" = 'true' ]; then " +
+                "  echo '[INFO] ✓ 所有基础镜像均在本地 Registry, 重写 FROM' && " +
+                "  sed -i 's|^FROM docker\\.io/|FROM '\"$REGISTRY\"'/|; s|^FROM library/|FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
+                "  sed -i '/^FROM [^/]*$/s|^FROM |FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
                 "  cat \"$DF\"; " +
                 "else " +
-                "  echo '[WARN] ✗ 基础镜像不在本地 Registry, 自动生成 Dockerfile (fallback)' && " +
-                // 自动寻找 maven 构建产物 jar
-                "  JAR=$(find /workspace/target -name '*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' 2>/dev/null | head -1) && " +
-                "  if [ -z \"$JAR\" ]; then " +
-                "    JAR=$(find /workspace -path '*/target/*.jar' ! -name '*-sources.jar' ! -name '*-javadoc.jar' 2>/dev/null | head -1); " +
-                "  fi && " +
-                "  if [ -z \"$JAR\" ]; then " +
-                "    echo '[ERROR] 找不到 JAR 文件, 无法生成 Dockerfile' && exit 1; " +
-                "  fi && " +
-                "  REL_JAR=$(echo \"$JAR\" | sed 's|^/workspace/||') && " +
-                "  echo \"[INFO] 发现 JAR: $REL_JAR\" && " +
-                // 生成标准 Spring Boot Dockerfile
-                "  printf 'FROM %%s/library/eclipse-temurin:17-jdk-jammy\\n" +
-                "WORKDIR /app\\n" +
-                "COPY %%s app.jar\\n" +
-                "EXPOSE 8080\\n" +
-                "ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]\\n' " +
-                "\"$REGISTRY\" \"$REL_JAR\" > \"$DF\" && " +
-                "  echo '[INFO] ✓ 已生成 Dockerfile:' && cat \"$DF\"; " +
+                // 生成多阶段 Dockerfile (Maven 打包 + 运行)
+                "  echo '[INFO] 生成多阶段 Dockerfile (Maven 打包 + 镜像构建一体化)' && " +
+                "  SETTINGS='<settings><mirrors><mirror><id>aliyun</id><mirrorOf>*</mirrorOf><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>' && " +
+                "  cat > \"$DF\" << 'DEOF'\n" +
+                "# ===== Stage 1: Maven Build =====\n" +
+                "FROM $REGISTRY/library/maven:3.9-eclipse-temurin-17 AS builder\n" +
+                "WORKDIR /build\n" +
+                "COPY . .\n" +
+                "RUN echo '$SETTINGS' > /root/.m2/settings.xml && $BUILD_CMD\n" +
+                "\n" +
+                "# ===== Stage 2: Runtime =====\n" +
+                "FROM $REGISTRY/library/eclipse-temurin:17-jdk-jammy\n" +
+                "WORKDIR /app\n" +
+                "COPY --from=builder /build/target/*.jar app.jar\n" +
+                "EXPOSE 8080\n" +
+                "ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]\n" +
+                "DEOF\n" +
+                // 用 sed 替换 heredoc 中的变量 (heredoc 用了单引号不会展开)
+                "  sed -i \"s|\\$REGISTRY|$REGISTRY|g; s|\\$SETTINGS|$SETTINGS|g; s|\\$BUILD_CMD|$BUILD_CMD|g\" \"$DF\" && " +
+                "  echo '[INFO] ✓ 已生成多阶段 Dockerfile:' && cat \"$DF\"; " +
                 "fi",
-                localRegistry, dfFile);
+                localRegistry, dfFile, buildCmd);
         jobBuilder = jobBuilder
                 .addNewInitContainer()
                 .withName("rewrite-dockerfile")
@@ -886,8 +845,8 @@ public class DevOpsService {
                 .endVolumeMount()
                 .endInitContainer();
 
-        // Init container 4: Kaniko (build to tar, 离线模式)
-        // 旧版 kaniko 仅支持: --insecure, --skip-tls-verify, --no-push, --tarPath 等基础参数
+        // Init container 3: Kaniko (多阶段构建 → tar, 离线模式)
+        // Kaniko 执行多阶段 Dockerfile: Maven 打包 + 运行镜像构建一体完成
         jobBuilder = jobBuilder
                 .addNewInitContainer()
                 .withName("kaniko")
@@ -952,11 +911,6 @@ public class DevOpsService {
                 .withNewHostPath()
                 .withPath("/run/k3s/containerd/containerd.sock")
                 .endHostPath()
-                .endVolume()
-                .addNewVolume()
-                .withName("maven-repo")
-                .withNewEmptyDir()
-                .endEmptyDir()
                 .endVolume()
                 .endSpec()
                 .endTemplate()

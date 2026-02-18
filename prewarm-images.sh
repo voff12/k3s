@@ -33,6 +33,7 @@ JOB_IMAGES=(
 # ============================================================
 BASE_IMAGES=(
     "eclipse-temurin:17-jdk-jammy"
+    "maven:3.9-eclipse-temurin-17"
 )
 
 # containerd 中可能的镜像名 (docker save/import 后的名字可能不同)
@@ -44,6 +45,16 @@ TEMURIN_LOCAL_NAMES=(
 TEMURIN_REMOTE_SOURCES=(
     "docker.m.daocloud.io/library/eclipse-temurin:17-jdk-jammy"
     "docker.xuanyuan.me/library/eclipse-temurin:17-jdk-jammy"
+)
+
+MAVEN_LOCAL_NAMES=(
+    "docker.io/library/maven:3.9-eclipse-temurin-17"
+    "maven:3.9-eclipse-temurin-17"
+    "library/maven:3.9-eclipse-temurin-17"
+)
+MAVEN_REMOTE_SOURCES=(
+    "docker.m.daocloud.io/library/maven:3.9-eclipse-temurin-17"
+    "docker.xuanyuan.me/library/maven:3.9-eclipse-temurin-17"
 )
 
 # 通用: 从多源拉取并 tag
@@ -164,23 +175,33 @@ echo "[策略] 优先从 containerd 本地已有镜像推送，不走外网"
 echo ""
 
 FAILED3=0
-for ORIGINAL in "${BASE_IMAGES[@]}"; do
-    LOCAL_REF="localhost:5000/library/${ORIGINAL}"
-    echo "[1/1] $ORIGINAL → $LOCAL_REF"
+IDX=0
+TOTAL=${#BASE_IMAGES[@]}
+
+# 通用推送函数: push_base_image <原始镜像名> <本地名列表名> <远程源列表名> <模糊关键词>
+push_base_image() {
+    local ORIGINAL="$1"
+    local -n LOCAL_NAMES_REF="$2"
+    local -n REMOTE_SOURCES_REF="$3"
+    local FUZZY_KEY1="$4"
+    local FUZZY_KEY2="$5"
+    local LOCAL_REF="localhost:5000/library/${ORIGINAL}"
+    IDX=$((IDX + 1))
+    echo "[$IDX/$TOTAL] $ORIGINAL → $LOCAL_REF"
 
     # 1) 检查 localhost:5000 是否已有
-    REPO="library/${ORIGINAL%%:*}"
-    TAG="${ORIGINAL##*:}"
+    local REPO="library/${ORIGINAL%%:*}"
+    local TAG="${ORIGINAL##*:}"
     if curl -s "http://localhost:5000/v2/${REPO}/tags/list" 2>/dev/null | grep -q "$TAG"; then
         echo "        [SKIP] 本地 Registry 已存在"
         echo ""
-        continue
+        return 0
     fi
 
-    # 2) 优先: 在 containerd 中查找已有镜像 (docker save + k3s ctr import 的结果)
-    FOUND_LOCAL=""
+    # 2) 优先: 在 containerd 中查找已有镜像
+    local FOUND_LOCAL=""
     echo "        查找 containerd 本地镜像..."
-    for NAME in "${TEMURIN_LOCAL_NAMES[@]}"; do
+    for NAME in "${LOCAL_NAMES_REF[@]}"; do
         if $CTR images ls -q | grep -q "${NAME}"; then
             FOUND_LOCAL="$NAME"
             echo "        [OK] 找到本地镜像: $NAME"
@@ -188,9 +209,9 @@ for ORIGINAL in "${BASE_IMAGES[@]}"; do
         fi
     done
 
-    # 也用模糊匹配兜底 (k3s ctr images import 后 tag 可能不规范)
-    if [ -z "$FOUND_LOCAL" ]; then
-        FUZZY=$($CTR images ls -q | grep "eclipse-temurin" | grep "17-jdk-jammy" | head -1)
+    # 模糊匹配兜底
+    if [ -z "$FOUND_LOCAL" ] && [ -n "$FUZZY_KEY1" ]; then
+        local FUZZY=$($CTR images ls -q | grep "$FUZZY_KEY1" | grep "$FUZZY_KEY2" | head -1)
         if [ -n "$FUZZY" ]; then
             FOUND_LOCAL="$FUZZY"
             echo "        [OK] 模糊匹配到本地镜像: $FUZZY"
@@ -198,7 +219,6 @@ for ORIGINAL in "${BASE_IMAGES[@]}"; do
     fi
 
     if [ -n "$FOUND_LOCAL" ]; then
-        # 直接从 containerd 本地推送到 localhost:5000, 不走外网
         echo "        推送到 localhost:5000 (本地 → 本地, 不走外网)..."
         $CTR images tag "$FOUND_LOCAL" "$LOCAL_REF" 2>/dev/null || true
         if $CTR images push --plain-http "$LOCAL_REF" > /dev/null 2>&1; then
@@ -210,8 +230,8 @@ for ORIGINAL in "${BASE_IMAGES[@]}"; do
     else
         # 3) 本地没有, 从外网拉
         echo "        containerd 中未找到, 尝试从外网拉取..."
-        PULLED=false
-        for SRC in "${TEMURIN_REMOTE_SOURCES[@]}"; do
+        local PULLED=false
+        for SRC in "${REMOTE_SOURCES_REF[@]}"; do
             echo "        拉取: $SRC"
             if $CTR images pull "$SRC" > /dev/null 2>&1; then
                 $CTR images tag "$SRC" "$LOCAL_REF" 2>/dev/null || true
@@ -229,7 +249,12 @@ for ORIGINAL in "${BASE_IMAGES[@]}"; do
         fi
     fi
     echo ""
-done
+}
+
+# 推送 eclipse-temurin
+push_base_image "eclipse-temurin:17-jdk-jammy" TEMURIN_LOCAL_NAMES TEMURIN_REMOTE_SOURCES "eclipse-temurin" "17-jdk-jammy"
+# 推送 maven (多阶段 Dockerfile 需要)
+push_base_image "maven:3.9-eclipse-temurin-17" MAVEN_LOCAL_NAMES MAVEN_REMOTE_SOURCES "maven" "3.9-eclipse-temurin-17"
 echo "阶段3: 成功 $((${#BASE_IMAGES[@]} - FAILED3))/${#BASE_IMAGES[@]}"
 echo ""
 
@@ -261,11 +286,14 @@ if [ $TOTAL_FAIL -gt 0 ]; then
     echo "手动补救:"
     echo "  # 在有 Docker 的机器上:"
     echo "  docker pull eclipse-temurin:17-jdk-jammy"
+    echo "  docker pull maven:3.9-eclipse-temurin-17"
     echo "  docker save eclipse-temurin:17-jdk-jammy -o temurin.tar"
-    echo "  scp temurin.tar root@<K3s节点>:/root/"
+    echo "  docker save maven:3.9-eclipse-temurin-17 -o maven.tar"
+    echo "  scp temurin.tar maven.tar root@<K3s节点>:/root/"
     echo ""
     echo "  # 在 K3s 节点上:"
     echo "  k3s ctr images import temurin.tar"
+    echo "  k3s ctr images import maven.tar"
     echo "  # 然后重新执行本脚本即可自动推送到 localhost:5000"
 fi
 

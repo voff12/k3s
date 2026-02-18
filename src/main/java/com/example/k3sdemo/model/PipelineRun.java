@@ -15,8 +15,7 @@ public class PipelineRun {
     public enum Status {
         PENDING("等待中"),
         CLONING("代码克隆"),
-        PACKAGING("Maven打包"),
-        BUILDING("镜像构建"),
+        BUILDING("多阶段构建"),
         PUSHING("导入节点"),
         DEPLOYING("K3s部署"),
         SUCCESS("成功"),
@@ -36,7 +35,7 @@ public class PipelineRun {
     private final String id;
     private final PipelineConfig config;
     private volatile Status status;
-    private volatile int currentStep; // 0-5
+    private volatile int currentStep; // 0-4
     private final LocalDateTime startTime;
     private volatile LocalDateTime endTime;
     private final List<String> logs;
@@ -78,12 +77,11 @@ public class PipelineRun {
         this.lastActivityTime = LocalDateTime.now();
         switch (newStatus) {
             case CLONING -> currentStep = 0;
-            case PACKAGING -> currentStep = 1;
-            case BUILDING -> currentStep = 2;
-            case PUSHING -> currentStep = 3;
-            case DEPLOYING -> currentStep = 4;
+            case BUILDING -> currentStep = 1;
+            case PUSHING -> currentStep = 2;
+            case DEPLOYING -> currentStep = 3;
             case SUCCESS, FAILED -> {
-                currentStep = 5;
+                currentStep = 4;
                 endTime = LocalDateTime.now();
             }
             default -> {
