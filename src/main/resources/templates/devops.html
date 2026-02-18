@@ -625,6 +625,7 @@
                     alert('错误: ' + data.error);
                 }
             } catch (e) {
+                console.error('Pipeline error:', e);
                 alert('请求失败: ' + e.message);
             }
         }
@@ -742,16 +743,19 @@
         }
 
         // ========== Stepper ==========
-        const stepNames = ['代码克隆', 'Maven打包', '镜像构建', '导入节点', 'K3s部署', '完成'];
+        const stepNames = ['代码克隆', '多阶段构建', '导入节点', 'K3s部署', '完成'];
 
         function resetStepper() {
-            for (let i = 0; i <= 5; i++) {
+            for (let i = 0; i <= 4; i++) {
                 const el = document.getElementById('step' + i);
+                const labelEl = document.getElementById('step' + i + 'label');
+                if (!el || !labelEl) continue;
                 el.className = 'size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300';
-                document.getElementById('step' + i + 'label').textContent = '等待中';
-                document.getElementById('step' + i + 'label').className = 'text-[10px] text-slate-400';
+                labelEl.textContent = '等待中';
+                labelEl.className = 'text-[10px] text-slate-400';
             }
-            document.getElementById('stepperProgress').style.width = '0%';
+            const progress = document.getElementById('stepperProgress');
+            if (progress) progress.style.width = '0%';
             updateStatusBadge('PENDING', '等待中');
         }
 
@@ -774,6 +778,7 @@
             for (let i = 0; i <= 4; i++) {
                 const el = document.getElementById('step' + i);
                 const labelEl = document.getElementById('step' + i + 'label');
+                if (!el || !labelEl) continue;
 
                 if (i < step) {
                     // Completed
