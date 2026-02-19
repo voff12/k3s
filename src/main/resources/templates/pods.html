@@ -54,18 +54,22 @@
         class="sticky top-0 z-50 w-full bg-white dark:bg-background-dark border-b border-slate-200 dark:border-slate-800">
         <div class="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between">
             <div class="flex items-center gap-4">
-                <div class="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg">
+                <div
+                    class="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5">
-                        <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 2.18l8 4v8.82c0 4.54-3.07 8.83-7.09 9.95C8.07 19.83 5 15.54 5 11V8.18l7-3.5z"/>
-                        <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                        <path
+                            d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 2.18l8 4v8.82c0 4.54-3.07 8.83-7.09 9.95C8.07 19.83 5 15.54 5 11V8.18l7-3.5z" />
+                        <path
+                            d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z" />
                     </svg>
                 </div>
-                <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">灵犀平台</h1>
+                <h1
+                    class="text-lg font-bold tracking-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                    灵犀平台</h1>
             </div>
             <nav class="hidden md:flex items-center gap-8">
                 <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
                     href="/dashboard">集群概览</a>
-                <a class="text-sm font-bold text-primary border-b-2 border-primary py-5" href="/">Pod 列表</a>
                 <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
                     href="/store">存储卷</a>
                 <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors"
@@ -136,6 +140,7 @@
                         class="bg-slate-50 dark:bg-slate-900 border-none rounded-lg text-sm py-2 px-4 focus:ring-2 focus:ring-primary min-w-[160px]">
                         <option value="default" th:selected="${namespace == 'default'}">default</option>
                         <option value="kube-system" th:selected="${namespace == 'kube-system'}">kube-system</option>
+                        <option value="harbor" th:selected="${namespace == 'harbor'}">harbor</option>
                     </select>
                 </div>
                 <div class="flex flex-col">
@@ -368,7 +373,8 @@
                 </div>
                 <form method="post" id="scale-form" class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">副本数 (Replicas)</label>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">副本数
+                            (Replicas)</label>
                         <input name="replicas" type="number" min="0" id="scale-replicas" required
                             class="w-full px-4 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-primary outline-none" />
                         <p class="text-xs text-slate-500 mt-1">当前可用副本数: <span id="current-replicas">-</span></p>
@@ -419,10 +425,10 @@
 
     <script>
         // Add event listeners for YAML buttons and Scale buttons
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             const yamlButtons = document.querySelectorAll('.yaml-btn');
             yamlButtons.forEach(button => {
-                button.addEventListener('click', function() {
+                button.addEventListener('click', function () {
                     const namespace = this.getAttribute('data-namespace');
                     const podName = this.getAttribute('data-pod-name');
                     showYamlModal(namespace, podName);
@@ -431,7 +437,7 @@
 
             const scaleButtons = document.querySelectorAll('.scale-btn');
             scaleButtons.forEach(button => {
-                button.addEventListener('click', function() {
+                button.addEventListener('click', function () {
                     const namespace = this.getAttribute('data-namespace');
                     const podName = this.getAttribute('data-pod-name');
                     showScaleModal(namespace, podName);
@@ -463,14 +469,14 @@
             const modal = document.getElementById('yamlModal');
             const content = document.getElementById('yaml-modal-content');
             const codeElement = content.querySelector('code');
-            
+
             // Show modal
             modal.showModal();
-            
+
             // Show loading state
             codeElement.textContent = 'Loading YAML...';
             codeElement.className = 'language-yaml';
-            
+
             // Fetch YAML
             fetch(`/pods/${namespace}/${podName}/yaml`)
                 .then(response => response.text())

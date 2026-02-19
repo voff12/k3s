@@ -775,8 +775,8 @@ public class DevOpsService {
 
         // Init container 2: 智能 Dockerfile 处理 (多阶段构建)
         // 统一生成多阶段 Dockerfile:
-        //   阶段1 (builder): Maven 打包 — 基于 maven:3.9-eclipse-temurin-17
-        //   阶段2 (runtime): 仅 COPY jar 运行 — 基于 eclipse-temurin:17-jdk-jammy
+        // 阶段1 (builder): Maven 打包 — 基于 maven:3.9-eclipse-temurin-17
+        // 阶段2 (runtime): 仅 COPY jar 运行 — 基于 eclipse-temurin:17-jdk-jammy
         // 这样 maven-build init container 不再需要, Kaniko 一步完成打包+构建
         String dockerfilePath = config.getDockerfilePath();
         String dfFile = dockerfilePath.startsWith("./") ? dockerfilePath.substring(2) : dockerfilePath;
@@ -785,50 +785,53 @@ public class DevOpsService {
         // 使用 printf 生成 Dockerfile (兼容 sh -c 单行执行)
         String rewriteCmd = String.format(
                 "REGISTRY='%s' && " +
-                "DF='/workspace/%s' && " +
-                "BUILD_CMD='%s' && " +
-                // 安装 curl
-                "sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && " +
-                "apk add --no-cache curl > /dev/null 2>&1 && " +
-                // 检查 Dockerfile 是否存在
-                "if [ ! -f \"$DF\" ]; then " +
-                "  echo '[WARN] Dockerfile 不存在, 将直接生成多阶段 Dockerfile'; " +
-                "  ALL_AVAILABLE=false; " +
-                "else " +
-                // 检查所有 FROM 基础镜像是否在本地 registry 中
-                "  ALL_AVAILABLE=true && " +
-                "  for IMG in $(grep -i '^FROM ' \"$DF\" | awk '{print $2}'); do " +
-                "    CLEAN_IMG=$(echo \"$IMG\" | sed 's|^docker\\.io/||; s|^library/||') && " +
-                "    REPO=\"library/${CLEAN_IMG%%%%:*}\" && " +
-                "    TAG=\"${CLEAN_IMG##*:}\" && " +
-                "    if ! curl -sf \"http://$REGISTRY/v2/$REPO/tags/list\" 2>/dev/null | grep -q \"$TAG\"; then " +
-                "      echo \"[WARN] 镜像 $IMG 不在 $REGISTRY 中\" && " +
-                "      ALL_AVAILABLE=false; " +
-                "    fi; " +
-                "  done; " +
-                "fi && " +
-                // 分支: 基础镜像可用 → 重写 FROM; 不可用 → 生成多阶段 Dockerfile
-                "if [ \"$ALL_AVAILABLE\" = 'true' ]; then " +
-                "  echo '[INFO] ✓ 所有基础镜像均在本地 Registry, 重写 FROM' && " +
-                "  sed -i 's|^FROM docker\\.io/|FROM '\"$REGISTRY\"'/|; s|^FROM library/|FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
-                "  sed -i '/^FROM [^/]*$/s|^FROM |FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
-                "  echo '[INFO] 重写后 Dockerfile:' && cat \"$DF\"; " +
-                "else " +
-                "  echo '[INFO] 生成多阶段 Dockerfile (Maven 打包 + 镜像构建一体化)' && " +
-                "  SETTINGS='<settings><mirrors><mirror><id>aliyun</id><mirrorOf>*</mirrorOf><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>' && " +
-                "  printf 'FROM %%s/library/maven:3.9-eclipse-temurin-17 AS builder\\n" +
-                "WORKDIR /build\\n" +
-                "COPY . .\\n" +
-                "RUN mkdir -p /root/.m2 && echo '\\''%%s'\\'' > /root/.m2/settings.xml && %%s\\n" +
-                "\\n" +
-                "FROM %%s/library/eclipse-temurin:17-jdk-jammy\\n" +
-                "WORKDIR /app\\n" +
-                "COPY --from=builder /build/target/*.jar app.jar\\n" +
-                "EXPOSE 8080\\n" +
-                "ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]\\n' " +
-                "\"$REGISTRY\" \"$SETTINGS\" \"$BUILD_CMD\" \"$REGISTRY\" > \"$DF\" && " +
-                "  echo '[INFO] ✓ 已生成多阶段 Dockerfile:' && cat \"$DF\"; " +
-                "fi",
+                        "DF='/workspace/%s' && " +
+                        "BUILD_CMD='%s' && " +
+                        // 安装 curl
+                        "sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && " +
+                        "apk add --no-cache curl > /dev/null 2>&1 && " +
+                        // 检查 Dockerfile 是否存在
+                        "if [ ! -f \"$DF\" ]; then " +
+                        "  echo '[WARN] Dockerfile 不存在, 将直接生成多阶段 Dockerfile'; " +
+                        "  ALL_AVAILABLE=false; " +
+                        "else " +
+                        // 检查所有 FROM 基础镜像是否在本地 registry 中
+                        "  ALL_AVAILABLE=true && " +
+                        "  for IMG in $(grep -i '^FROM ' \"$DF\" | awk '{print $2}'); do " +
+                        "    CLEAN_IMG=$(echo \"$IMG\" | sed 's|^docker\\.io/||; s|^library/||') && " +
+                        "    REPO=\"library/${CLEAN_IMG%%%%:*}\" && " +
+                        "    TAG=\"${CLEAN_IMG##*:}\" && " +
+                        "    if ! curl -sf \"http://$REGISTRY/v2/$REPO/tags/list\" 2>/dev/null | grep -q \"$TAG\"; then "
+                        +
+                        "      echo \"[WARN] 镜像 $IMG 不在 $REGISTRY 中\" && " +
+                        "      ALL_AVAILABLE=false; " +
+                        "    fi; " +
+                        "  done; " +
+                        "fi && " +
+                        // 分支: 基础镜像可用 → 重写 FROM; 不可用 → 生成多阶段 Dockerfile
+                        "if [ \"$ALL_AVAILABLE\" = 'true' ]; then " +
+                        "  echo '[INFO] ✓ 所有基础镜像均在本地 Registry, 重写 FROM' && " +
+                        "  sed -i 's|^FROM docker\\.io/|FROM '\"$REGISTRY\"'/|; s|^FROM library/|FROM '\"$REGISTRY\"'/library/|' \"$DF\" && "
+                        +
+                        "  sed -i '/^FROM [^/]*$/s|^FROM |FROM '\"$REGISTRY\"'/library/|' \"$DF\" && " +
+                        "  echo '[INFO] 重写后 Dockerfile:' && cat \"$DF\"; " +
+                        "else " +
+                        "  echo '[INFO] 生成多阶段 Dockerfile (Maven 打包 + 镜像构建一体化)' && " +
+                        "  SETTINGS='<settings><mirrors><mirror><id>aliyun</id><mirrorOf>*</mirrorOf><url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>' && "
+                        +
+                        "  printf 'FROM %%s/library/maven:3.9-eclipse-temurin-17 AS builder\\n" +
+                        "WORKDIR /build\\n" +
+                        "COPY . .\\n" +
+                        "RUN mkdir -p /root/.m2 && echo '\\''%%s'\\'' > /root/.m2/settings.xml && %%s\\n" +
+                        "\\n" +
+                        "FROM %%s/library/eclipse-temurin:17-jdk-jammy\\n" +
+                        "WORKDIR /app\\n" +
+                        "COPY --from=builder /build/target/*.jar app.jar\\n" +
+                        "EXPOSE 8080\\n" +
+                        "ENTRYPOINT [\"java\",\"-jar\",\"app.jar\"]\\n' " +
+                        "\"$REGISTRY\" \"$SETTINGS\" \"$BUILD_CMD\" \"$REGISTRY\" > \"$DF\" && " +
+                        "  echo '[INFO] ✓ 已生成多阶段 Dockerfile:' && cat \"$DF\"; " +
+                        "fi",
                 localRegistry, dfFile, buildCmd);
         jobBuilder = jobBuilder
                 .addNewInitContainer()
@@ -857,7 +860,8 @@ public class DevOpsService {
                         "--destination=" + fullImage,
                         "--insecure",
                         "--skip-tls-verify",
-                        "--cache=false")
+                        "--cache=false",
+                        "--oci-layout-path=")
                 .addNewVolumeMount()
                 .withName("workspace")
                 .withMountPath("/workspace")

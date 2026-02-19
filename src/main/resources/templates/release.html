@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
-    <title>DevOps Pipeline - Phoenix-Core</title>
+    <title>应用发布 - Phoenix-Core</title>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
@@ -19,6 +19,7 @@
                         "success": "#22c55e",
                         "warning": "#f59e0b",
                         "danger": "#ef4444",
+                        "harbor": "#60b5f6",
                     },
                     fontFamily: {
                         "display": ["Inter", "sans-serif"],
@@ -32,10 +33,6 @@
         .material-symbols-outlined {
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
             vertical-align: middle;
-        }
-
-        .filled .material-symbols-outlined {
-            font-variation-settings: 'FILL' 1;
         }
 
         .console-area::-webkit-scrollbar {
@@ -97,21 +94,21 @@
         <!-- Sidebar -->
         <aside class="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0">
             <div class="p-6 flex items-center gap-3 border-b border-slate-100">
-                <div class="bg-primary p-1.5 rounded-lg">
-                    <span class="material-symbols-outlined text-white">developer_board</span>
+                <div class="bg-gradient-to-br from-primary to-blue-600 p-1.5 rounded-lg">
+                    <span class="material-symbols-outlined text-white">rocket_launch</span>
                 </div>
-                <span class="font-bold text-lg tracking-tight">Phoenix DevOps</span>
+                <span class="font-bold text-lg tracking-tight">Phoenix Release</span>
             </div>
             <nav class="flex-1 p-4 space-y-1">
                 <a class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-primary/10 text-primary font-medium"
-                    href="/devops">
-                    <span class="material-symbols-outlined">account_tree</span>
-                    <span>流水线</span>
-                </a>
-                <a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
                     href="/release">
                     <span class="material-symbols-outlined">deployed_code</span>
                     <span>应用发布</span>
+                </a>
+                <a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
+                    href="/devops">
+                    <span class="material-symbols-outlined">account_tree</span>
+                    <span>流水线</span>
                 </a>
                 <a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600 hover:bg-slate-50 transition-colors"
                     href="/pods">
@@ -132,12 +129,12 @@
             <div class="p-4 border-t border-slate-100">
                 <div class="flex items-center gap-3 p-2 rounded-xl bg-slate-50 border border-slate-100">
                     <div
-                        class="size-10 rounded-full bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-white font-bold text-sm">
+                        class="size-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white font-bold text-sm">
                         SRE
                     </div>
                     <div class="overflow-hidden">
                         <p class="text-sm font-semibold truncate">SRE 工程师</p>
-                        <p class="text-xs text-slate-500 truncate">DevOps 平台</p>
+                        <p class="text-xs text-slate-500 truncate">发布管理平台</p>
                     </div>
                 </div>
             </div>
@@ -148,19 +145,20 @@
             <!-- Header -->
             <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0">
                 <div class="flex items-center gap-4">
-                    <h1 class="text-lg font-bold text-slate-900">CI/CD 流水线</h1>
-                    <span class="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">K3s + Kaniko (离线模式)</span>
+                    <h1 class="text-lg font-bold text-slate-900">应用发布管理</h1>
+                    <span class="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">K8s Job + Harbor +
+                        K3s</span>
                 </div>
                 <div class="flex items-center gap-3">
-                    <button onclick="refreshPipelines()"
+                    <button onclick="refreshReleases()"
                         class="p-2 text-slate-500 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
                         title="刷新">
                         <span class="material-symbols-outlined">refresh</span>
                     </button>
-                    <button onclick="showNewPipelineModal()"
-                        class="bg-primary text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-600 transition-colors flex items-center gap-2 shadow-sm shadow-primary/25">
-                        <span class="material-symbols-outlined text-sm">play_arrow</span>
-                        新建流水线
+                    <button onclick="showNewReleaseModal()"
+                        class="bg-gradient-to-r from-primary to-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:shadow-lg hover:shadow-primary/25 transition-all flex items-center gap-2">
+                        <span class="material-symbols-outlined text-sm">rocket_launch</span>
+                        新建发布
                     </button>
                 </div>
             </header>
@@ -169,23 +167,23 @@
             <div class="flex-1 overflow-y-auto p-6">
                 <div class="max-w-7xl mx-auto space-y-6">
 
-                    <!-- Active Pipeline Panel (hidden by default) -->
-                    <div id="activePipelinePanel" class="hidden fade-in">
+                    <!-- Active Release Panel (hidden by default) -->
+                    <div id="activeReleasePanel" class="hidden fade-in">
                         <!-- Status & Stepper -->
                         <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mb-6">
                             <div class="flex items-center justify-between mb-8">
                                 <div>
                                     <div class="flex items-center gap-3">
                                         <h2 class="text-xl font-bold text-slate-900">
-                                            流水线 #<span id="pipelineId">—</span>
+                                            发布 #<span id="releaseId">—</span>
                                         </h2>
                                         <span id="statusBadge"
                                             class="px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1">
                                         </span>
                                     </div>
                                     <p class="text-sm text-slate-500 mt-1">
-                                        <span id="pipelineMeta"></span> •
-                                        耗时 <span id="pipelineDuration" class="font-mono font-medium">00:00</span>
+                                        <span id="releaseMeta"></span> •
+                                        耗时 <span id="releaseDuration" class="font-mono font-medium">00:00</span>
                                     </p>
                                 </div>
                                 <button onclick="closeActivePanel()"
@@ -194,67 +192,44 @@
                                 </button>
                             </div>
 
-                            <!-- Pipeline Stepper -->
-                            <div class="relative flex justify-between" id="pipelineStepper">
-                                <!-- Background line -->
-                                <div class="absolute top-5 left-[8%] right-[8%] h-0.5 bg-slate-100"></div>
+                            <!-- Release Stepper (3 steps: 0-2) -->
+                            <div class="relative flex justify-between" id="releaseStepper">
+                                <div class="absolute top-5 left-[12%] right-[12%] h-0.5 bg-slate-100"></div>
                                 <div id="stepperProgress"
-                                    class="absolute top-5 left-[8%] h-0.5 bg-primary transition-all duration-700"
+                                    class="absolute top-5 left-[12%] h-0.5 bg-primary transition-all duration-700"
                                     style="width:0%"></div>
 
-                                <!-- Step 0: Clone -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="0">
+                                <!-- Step 0: Build & Push -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-4 z-10" data-step="0">
                                     <div id="step0"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
-                                        <span class="material-symbols-outlined">download</span>
+                                        <span class="material-symbols-outlined">deployed_code_update</span>
                                     </div>
                                     <div class="text-center">
-                                        <p class="text-xs font-bold">代码克隆</p>
+                                        <p class="text-xs font-bold">构建发布</p>
                                         <p class="text-[10px] text-slate-400" id="step0label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 1: Multi-stage Build (Maven + Image) -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="1">
+                                <!-- Step 1: Deploy -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-4 z-10" data-step="1">
                                     <div id="step1"
-                                        class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
-                                        <span class="material-symbols-outlined">build</span>
-                                    </div>
-                                    <div class="text-center">
-                                        <p class="text-xs font-bold">多阶段构建</p>
-                                        <p class="text-[10px] text-slate-400" id="step1label">等待中</p>
-                                    </div>
-                                </div>
-                                <!-- Step 2: Import to Node -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="2">
-                                    <div id="step2"
-                                        class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
-                                        <span class="material-symbols-outlined">download_for_offline</span>
-                                    </div>
-                                    <div class="text-center">
-                                        <p class="text-xs font-bold">导入节点</p>
-                                        <p class="text-[10px] text-slate-400" id="step2label">等待中</p>
-                                    </div>
-                                </div>
-                                <!-- Step 3: Deploy -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="3">
-                                    <div id="step3"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">rocket_launch</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">K3s 部署</p>
-                                        <p class="text-[10px] text-slate-400" id="step3label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step1label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 4: Complete -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="4">
-                                    <div id="step4"
+                                <!-- Step 2: Done -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-4 z-10" data-step="2">
+                                    <div id="step2"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">check_circle</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">完成</p>
-                                        <p class="text-[10px] text-slate-400" id="step4label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step2label">等待中</p>
                                     </div>
                                 </div>
                             </div>
@@ -273,7 +248,7 @@
                                                 <div class="size-3 rounded-full bg-yellow-500/80"></div>
                                                 <div class="size-3 rounded-full bg-green-500/80"></div>
                                             </div>
-                                            <span class="text-xs text-slate-400 font-mono">实时构建日志 (SSE)</span>
+                                            <span class="text-xs text-slate-400 font-mono">发布日志 (SSE 实时)</span>
                                         </div>
                                         <div class="flex items-center gap-3">
                                             <label class="flex items-center gap-2 cursor-pointer select-none">
@@ -296,18 +271,18 @@
                                     </div>
                                     <div id="consoleOutput"
                                         class="p-4 font-mono text-sm h-[420px] overflow-y-auto console-area text-slate-300 leading-relaxed space-y-0.5">
-                                        <p class="text-slate-600 italic">等待流水线启动...</p>
+                                        <p class="text-slate-600 italic">等待发布启动...</p>
                                     </div>
                                 </div>
                             </div>
 
                             <!-- Sidebar Info -->
                             <div class="col-span-4 space-y-4">
-                                <!-- Pipeline Config -->
+                                <!-- Release Config -->
                                 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
                                     <h4 class="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
                                         <span class="material-symbols-outlined text-primary text-lg">settings</span>
-                                        构建配置
+                                        发布配置
                                     </h4>
                                     <div class="space-y-3">
                                         <div class="p-2.5 bg-slate-50 rounded-lg border border-slate-100">
@@ -334,7 +309,7 @@
                                     </div>
                                 </div>
 
-                                <!-- Resource Info -->
+                                <!-- Architecture Info -->
                                 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
                                     <h4 class="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
                                         <span class="material-symbols-outlined text-primary text-lg">lan</span>
@@ -343,19 +318,23 @@
                                     <div class="space-y-2">
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">构建引擎</span>
-                                            <span class="font-mono font-medium text-slate-700">Kaniko in K3s Job</span>
+                                            <span class="font-mono font-medium text-slate-700">K8s Job</span>
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
-                                            <span class="text-slate-500">镜像存储</span>
-                                            <span class="font-mono font-medium text-success">本地 containerd</span>
+                                            <span class="text-slate-500">代码构建</span>
+                                            <span class="font-mono font-medium text-slate-700">Maven 3.9</span>
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
-                                            <span class="text-slate-500">部署方式</span>
-                                            <span class="font-mono font-medium text-slate-700">K3s ctr import</span>
+                                            <span class="text-slate-500">镜像构建</span>
+                                            <span class="font-mono font-medium text-slate-700">Kaniko</span>
+                                        </div>
+                                        <div class="flex justify-between items-center text-xs">
+                                            <span class="text-slate-500">镜像仓库</span>
+                                            <span class="font-mono font-medium text-harbor">Harbor</span>
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">消息推送</span>
-                                            <span class="font-mono font-medium text-primary">SSE 实时通信</span>
+                                            <span class="font-mono font-medium text-primary">SSE 实时</span>
                                         </div>
                                     </div>
                                 </div>
@@ -367,6 +346,11 @@
                                         部署目标
                                     </h4>
                                     <div class="space-y-2">
+                                        <div class="flex justify-between items-center text-xs">
+                                            <span class="text-slate-500">Harbor 项目</span>
+                                            <span class="font-mono font-medium text-harbor"
+                                                id="infoHarborProject">library</span>
+                                        </div>
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">命名空间</span>
                                             <span class="font-mono font-medium text-slate-700"
@@ -383,53 +367,53 @@
                         </div>
                     </div>
 
-                    <!-- Pipeline History -->
+                    <!-- Release History -->
                     <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                         <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                             <h3 class="font-bold text-slate-900 flex items-center gap-2">
                                 <span class="material-symbols-outlined text-primary">history</span>
-                                流水线历史
+                                发布历史
                             </h3>
                             <span class="text-xs text-slate-400" id="historyCount">0 条记录</span>
                         </div>
-                        <div id="pipelineHistory">
+                        <div id="releaseHistory">
                             <!-- Thymeleaf server-rendered history -->
-                            <div th:if="${#lists.isEmpty(pipelineRuns)}" class="p-12 text-center">
+                            <div th:if="${#lists.isEmpty(releases)}" class="p-12 text-center">
                                 <span
-                                    class="material-symbols-outlined text-5xl text-slate-300 mb-3">rocket_launch</span>
-                                <p class="text-slate-400 text-sm">暂无流水线记录</p>
-                                <p class="text-slate-300 text-xs mt-1">点击右上角「新建流水线」开始第一次构建</p>
+                                    class="material-symbols-outlined text-5xl text-slate-300 mb-3">deployed_code</span>
+                                <p class="text-slate-400 text-sm">暂无发布记录</p>
+                                <p class="text-slate-300 text-xs mt-1">点击右上角「新建发布」开始第一次应用发布</p>
                             </div>
-                            <div th:unless="${#lists.isEmpty(pipelineRuns)}">
-                                <div th:each="run : ${pipelineRuns}"
+                            <div th:unless="${#lists.isEmpty(releases)}">
+                                <div th:each="r : ${releases}"
                                     class="px-6 py-4 border-b border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer flex items-center justify-between"
-                                    th:data-pipeline-id="${run.id}" onclick="viewPipeline(this.dataset.pipelineId)">
+                                    th:data-release-id="${r.id}" onclick="viewRelease(this.dataset.releaseId)">
                                     <div class="flex items-center gap-4">
-                                        <div th:classappend="${run.status.name() == 'SUCCESS'} ? 'bg-success text-white' : (${run.status.name() == 'FAILED'} ? 'bg-danger text-white' : 'bg-primary text-white')"
+                                        <div th:classappend="${r.status.name() == 'SUCCESS'} ? 'bg-success text-white' : (${r.status.name() == 'FAILED'} ? 'bg-danger text-white' : 'bg-primary text-white')"
                                             class="size-9 rounded-lg flex items-center justify-center">
-                                            <span th:if="${run.status.name() == 'SUCCESS'}"
+                                            <span th:if="${r.status.name() == 'SUCCESS'}"
                                                 class="material-symbols-outlined text-lg">check</span>
-                                            <span th:if="${run.status.name() == 'FAILED'}"
+                                            <span th:if="${r.status.name() == 'FAILED'}"
                                                 class="material-symbols-outlined text-lg">close</span>
                                             <span
-                                                th:if="${run.status.name() != 'SUCCESS' and run.status.name() != 'FAILED'}"
+                                                th:if="${r.status.name() != 'SUCCESS' and r.status.name() != 'FAILED'}"
                                                 class="material-symbols-outlined text-lg animate-spin">sync</span>
                                         </div>
                                         <div>
                                             <p class="text-sm font-semibold text-slate-900">
-                                                #<span th:text="${run.id}"></span>
+                                                #<span th:text="${r.id}"></span>
                                                 <span class="font-normal text-slate-500"
-                                                    th:text="' — ' + ${run.config.imageName}"></span>
+                                                    th:text="' — ' + ${r.config.imageName}"></span>
                                             </p>
-                                            <p class="text-xs text-slate-400" th:text="${run.startTimeFormatted}"></p>
+                                            <p class="text-xs text-slate-400" th:text="${r.startTimeFormatted}"></p>
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-4">
-                                        <span class="text-xs font-mono text-slate-500" th:text="${run.duration}"></span>
+                                        <span class="text-xs font-mono text-slate-500" th:text="${r.duration}"></span>
                                         <span
-                                            th:classappend="${run.status.name() == 'SUCCESS'} ? 'bg-success/10 text-success' : (${run.status.name() == 'FAILED'} ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary')"
+                                            th:classappend="${r.status.name() == 'SUCCESS'} ? 'bg-success/10 text-success' : (${r.status.name() == 'FAILED'} ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary')"
                                             class="px-2 py-0.5 rounded-full text-xs font-bold"
-                                            th:text="${run.status.label}">
+                                            th:text="${r.status.label}">
                                         </span>
                                     </div>
                                 </div>
@@ -442,17 +426,17 @@
         </main>
     </div>
 
-    <!-- New Pipeline Modal -->
-    <div id="pipelineModal" class="fixed inset-0 z-50 hidden">
-        <div class="modal-backdrop absolute inset-0" onclick="hideNewPipelineModal()"></div>
+    <!-- New Release Modal -->
+    <div id="releaseModal" class="fixed inset-0 z-50 hidden">
+        <div class="modal-backdrop absolute inset-0" onclick="hideNewReleaseModal()"></div>
         <div
             class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-white rounded-2xl shadow-2xl w-[560px] max-h-[85vh] overflow-auto fade-in">
             <div class="p-6 border-b border-slate-100 flex items-center justify-between">
                 <h3 class="text-lg font-bold text-slate-900 flex items-center gap-2">
-                    <span class="material-symbols-outlined text-primary">add_circle</span>
-                    新建 CI/CD 流水线
+                    <span class="material-symbols-outlined text-primary">rocket_launch</span>
+                    新建应用发布
                 </h3>
-                <button onclick="hideNewPipelineModal()" class="text-slate-400 hover:text-slate-600">
+                <button onclick="hideNewReleaseModal()" class="text-slate-400 hover:text-slate-600">
                     <span class="material-symbols-outlined">close</span>
                 </button>
             </div>
@@ -483,7 +467,7 @@
                             class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
                     </div>
                 </div>
-                <!-- Tag + Dockerfile -->
+                <!-- Tag + Harbor Project -->
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">镜像
@@ -492,10 +476,26 @@
                             class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
                     </div>
                     <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Harbor
+                            项目</label>
+                        <input type="text" id="formHarborProject" value="library" placeholder="library"
+                            class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                    </div>
+                </div>
+                <!-- Dockerfile + Build Command -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
                         <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Dockerfile
                             路径</label>
                         <input type="text" id="formDockerfile" value="./Dockerfile" placeholder="./Dockerfile"
                             class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                    </div>
+                    <div>
+                        <label
+                            class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">构建命令</label>
+                        <input type="text" id="formBuildCommand" value="mvn clean package -DskipTests"
+                            placeholder="mvn clean package"
+                            class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono" />
                     </div>
                 </div>
                 <!-- Namespace + Deployment -->
@@ -509,68 +509,39 @@
                     <div>
                         <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Deployment
                             名称</label>
-                        <input type="text" id="formDeployment" placeholder="留空则仅构建镜像"
+                        <input type="text" id="formDeployment" placeholder="留空则仅构建推送镜像"
                             class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
                     </div>
                 </div>
-                <!-- Git Token (GitLab) -->
+                <!-- Git Token -->
                 <div>
                     <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Git Token
-                        <span class="text-slate-400 font-normal normal-case">(GitLab 私有仓库)</span></label>
+                        <span class="text-slate-400 font-normal normal-case">(私有仓库)</span></label>
                     <div class="relative">
                         <span
                             class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">key</span>
                         <input type="password" id="formGitToken" placeholder="留空则使用全局配置或公开访问"
                             class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
                     </div>
-                    <p class="text-[11px] text-slate-400 mt-1">支持 GitLab Personal Access Token / Project Token，用于克隆私有仓库
-                    </p>
-                </div>
-                <!-- Git Proxy -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Git 代理
-                        <span class="text-slate-400 font-normal normal-case">(访问 GitHub 加速)</span></label>
-                    <div class="relative">
-                        <span
-                            class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">vpn_lock</span>
-                        <input type="text" id="formGitProxy" placeholder="留空则使用全局配置或直连, 例: http://10.0.0.1:7890"
-                            class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono" />
-                    </div>
-                    <p class="text-[11px] text-slate-400 mt-1">K3s 节点无法直接访问 GitHub 时填写 HTTP/SOCKS5 代理地址，留空使用全局配置
-                    </p>
-                </div>
-                <!-- Build Command -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">构建命令
-                        <span class="text-slate-400 font-normal normal-case">(Maven/Gradle)</span></label>
-                    <div class="relative">
-                        <span
-                            class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">terminal</span>
-                        <input type="text" id="formBuildCommand" value="mvn clean package -DskipTests"
-                            placeholder="留空则跳过打包步骤"
-                            class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono" />
-                    </div>
-                    <p class="text-[11px] text-slate-400 mt-1">多阶段 Dockerfile 中 Maven 构建命令，留空则使用默认命令
-                    </p>
                 </div>
                 <!-- Hint -->
                 <div class="flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                     <span class="material-symbols-outlined text-primary text-lg mt-0.5">info</span>
                     <p class="text-xs text-blue-700 leading-relaxed">
-                        流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、多阶段构建 (Maven 打包 + 镜像构建一体化) 并直接导入 K3s 节点 (不依赖外网)。
-                        如果指定了 Deployment 名称，还会自动更新 K3s 集群中的部署。
+                        发布流程: K8s Job 自动编排 → 克隆代码 → Maven 构建 + Kaniko 镜像构建推送 Harbor → kubectl 部署
+                        K3s。全程 SSE 实时日志推送。
                     </p>
                 </div>
             </div>
             <div class="p-6 border-t border-slate-100 flex justify-end gap-3">
-                <button onclick="hideNewPipelineModal()"
+                <button onclick="hideNewReleaseModal()"
                     class="px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
                     取消
                 </button>
-                <button onclick="submitPipeline()"
-                    class="px-6 py-2.5 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-2 shadow-sm shadow-primary/25">
-                    <span class="material-symbols-outlined text-sm">play_arrow</span>
-                    开始构建
+                <button onclick="submitRelease()"
+                    class="px-6 py-2.5 bg-gradient-to-r from-primary to-blue-600 text-white text-sm font-semibold rounded-lg hover:shadow-lg hover:shadow-primary/25 transition-all flex items-center gap-2">
+                    <span class="material-symbols-outlined text-sm">rocket_launch</span>
+                    开始发布
                 </button>
             </div>
         </div>
@@ -579,7 +550,7 @@
     <script>
         // ========== State ==========
         let currentEventSource = null;
-        let currentPipelineId = null;
+        let currentReleaseId = null;
         let autoScroll = true;
 
         document.getElementById('autoScroll').addEventListener('change', function () {
@@ -587,15 +558,15 @@
         });
 
         // ========== Modal ==========
-        function showNewPipelineModal() {
-            document.getElementById('pipelineModal').classList.remove('hidden');
+        function showNewReleaseModal() {
+            document.getElementById('releaseModal').classList.remove('hidden');
         }
-        function hideNewPipelineModal() {
-            document.getElementById('pipelineModal').classList.add('hidden');
+        function hideNewReleaseModal() {
+            document.getElementById('releaseModal').classList.add('hidden');
         }
 
-        // ========== Submit Pipeline ==========
-        async function submitPipeline() {
+        // ========== Submit Release ==========
+        async function submitRelease() {
             const gitUrl = document.getElementById('formGitUrl').value.trim();
             const imageName = document.getElementById('formImageName').value.trim();
 
@@ -611,12 +582,12 @@
                 deploymentName: document.getElementById('formDeployment').value.trim(),
                 dockerfilePath: document.getElementById('formDockerfile').value.trim() || './Dockerfile',
                 gitToken: document.getElementById('formGitToken').value.trim(),
-                gitProxy: document.getElementById('formGitProxy').value.trim(),
-                buildCommand: document.getElementById('formBuildCommand').value.trim()
+                buildCommand: document.getElementById('formBuildCommand').value.trim(),
+                harborProject: document.getElementById('formHarborProject').value.trim() || 'library'
             };
 
             try {
-                const resp = await fetch('/devops/pipeline/run', {
+                const resp = await fetch('/release/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config)
@@ -624,83 +595,71 @@
                 const data = await resp.json();
 
                 if (data.success) {
-                    hideNewPipelineModal();
-                    activatePipeline(data.id, config);
+                    hideNewReleaseModal();
+                    activateRelease(data.id, config);
                 } else {
                     alert('错误: ' + data.error);
                 }
             } catch (e) {
-                console.error('Pipeline error:', e);
+                console.error('Release error:', e);
                 alert('请求失败: ' + e.message);
             }
         }
 
-        // ========== Activate Pipeline View ==========
-        function activatePipeline(id, config) {
-            currentPipelineId = id;
-
-            // Show panel
-            const panel = document.getElementById('activePipelinePanel');
+        // ========== Activate Release View ==========
+        function activateRelease(id, config) {
+            currentReleaseId = id;
+            const panel = document.getElementById('activeReleasePanel');
             panel.classList.remove('hidden');
 
-            // Set info
-            document.getElementById('pipelineId').textContent = id;
-            document.getElementById('pipelineMeta').textContent = config ? config.gitUrl : '';
+            document.getElementById('releaseId').textContent = id;
+            document.getElementById('releaseMeta').textContent = config ? config.gitUrl : '';
             document.getElementById('infoGitUrl').textContent = config ? config.gitUrl : '—';
             document.getElementById('infoBranch').textContent = config ? config.branch : '—';
             document.getElementById('infoImage').textContent = config ? (config.imageName + ':' + config.imageTag) : '—';
+            document.getElementById('infoHarborProject').textContent = config ? config.harborProject : 'library';
             document.getElementById('infoNamespace').textContent = config ? config.namespace : 'default';
             document.getElementById('infoDeployment').textContent = config && config.deploymentName ? config.deploymentName : '未指定';
 
-            // Reset steps
             resetStepper();
             clearConsole();
-
-            // Connect SSE
             connectSSE(id);
-
-            // Scroll to top
             panel.scrollIntoView({ behavior: 'smooth' });
         }
 
         // ========== SSE Connection ==========
-        function connectSSE(pipelineId) {
+        function connectSSE(releaseId) {
             if (currentEventSource) {
                 currentEventSource.close();
             }
 
-            const es = new EventSource('/devops/pipeline/' + pipelineId + '/stream');
+            const es = new EventSource('/release/' + releaseId + '/stream');
             currentEventSource = es;
 
-            // Initial data
             es.addEventListener('init', function (e) {
                 const data = JSON.parse(e.data);
                 updateStatus(data);
-                // Render existing logs
                 if (data.logs && data.logs.length > 0) {
-                    const console = document.getElementById('consoleOutput');
-                    console.innerHTML = '';
+                    const consoleEl = document.getElementById('consoleOutput');
+                    consoleEl.innerHTML = '';
                     data.logs.forEach(line => appendLogLine(line));
                 }
             });
 
-            // New log line
             es.addEventListener('log', function (e) {
                 const data = JSON.parse(e.data);
                 appendLogLine(data.line);
             });
 
-            // Status update
             es.addEventListener('status', function (e) {
                 const data = JSON.parse(e.data);
                 updateStatus(data);
             });
 
-            // Complete
             es.addEventListener('complete', function (e) {
                 es.close();
                 currentEventSource = null;
-                refreshPipelines();
+                refreshReleases();
             });
 
             es.onerror = function () {
@@ -712,13 +671,10 @@
         // ========== Console ==========
         function appendLogLine(line) {
             const consoleEl = document.getElementById('consoleOutput');
-            // Remove placeholder
             const placeholder = consoleEl.querySelector('.italic');
             if (placeholder) placeholder.remove();
 
             const p = document.createElement('p');
-
-            // Colorize log levels
             let html = escapeHtml(line);
             html = html.replace(/\[INFO\]/g, '<span class="text-blue-400">[INFO]</span>');
             html = html.replace(/\[WARN\]/g, '<span class="text-yellow-400">[WARN]</span>');
@@ -738,7 +694,7 @@
 
         function clearConsole() {
             document.getElementById('consoleOutput').innerHTML =
-                '<p class="text-slate-600 italic">等待流水线启动...</p>';
+                '<p class="text-slate-600 italic">等待发布启动...</p>';
         }
 
         function escapeHtml(str) {
@@ -747,11 +703,11 @@
             return div.innerHTML;
         }
 
-        // ========== Stepper ==========
-        const stepNames = ['代码克隆', '多阶段构建', '导入节点', 'K3s部署', '完成'];
+        // ========== Stepper (3 steps: 0-2) ==========
+        const stepNames = ['构建发布', 'K3s 部署', '完成'];
 
         function resetStepper() {
-            for (let i = 0; i <= 4; i++) {
+            for (let i = 0; i <= 2; i++) {
                 const el = document.getElementById('step' + i);
                 const labelEl = document.getElementById('step' + i + 'label');
                 if (!el || !labelEl) continue;
@@ -771,28 +727,24 @@
             const finished = data.finished;
             const duration = data.duration;
 
-            // Update badge
             updateStatusBadge(status, label);
 
-            // Update duration
             if (duration) {
-                document.getElementById('pipelineDuration').textContent = duration;
+                document.getElementById('releaseDuration').textContent = duration;
             }
 
-            // Update stepper (5 steps: 0-4)
-            for (let i = 0; i <= 4; i++) {
+            // Update stepper (3 steps: 0-2)
+            for (let i = 0; i <= 2; i++) {
                 const el = document.getElementById('step' + i);
                 const labelEl = document.getElementById('step' + i + 'label');
                 if (!el || !labelEl) continue;
 
                 if (i < step) {
-                    // Completed
                     el.className = 'size-10 rounded-full bg-success text-white flex items-center justify-center transition-all duration-300';
                     el.innerHTML = '<span class="material-symbols-outlined">check</span>';
                     labelEl.textContent = '完成';
                     labelEl.className = 'text-[10px] text-success font-medium';
                 } else if (i === step && !finished) {
-                    // Active
                     el.className = 'size-10 rounded-full bg-primary text-white flex items-center justify-center transition-all duration-300 step-active';
                     el.innerHTML = '<span class="material-symbols-outlined animate-spin">sync</span>';
                     labelEl.textContent = '进行中';
@@ -809,122 +761,114 @@
                         labelEl.textContent = '失败';
                         labelEl.className = 'text-[10px] text-danger font-medium';
                     }
+                } else {
+                    // Future steps
+                    const icons = ['deployed_code_update', 'rocket_launch', 'check_circle'];
+                    el.className = 'size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300';
+                    el.innerHTML = '<span class="material-symbols-outlined">' + icons[i] + '</span>';
+                    labelEl.textContent = '等待中';
+                    labelEl.className = 'text-[10px] text-slate-400';
                 }
             }
 
-            // Update progress bar (5 steps → each 20%)
-            const progressPercent = Math.min(step * 20 + (finished ? 20 : 0), 100);
-            document.getElementById('stepperProgress').style.width = progressPercent + '%';
+            // Progress bar
+            const progress = document.getElementById('stepperProgress');
+            if (progress) {
+                const pct = Math.min(100, Math.max(0, (step / 2) * 76));
+                progress.style.width = pct + '%';
+            }
         }
 
         function updateStatusBadge(status, label) {
             const badge = document.getElementById('statusBadge');
-            let cls = 'px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1 ';
-            let icon = '';
-
-            switch (status) {
-                case 'SUCCESS':
-                    cls += 'bg-success/10 text-success';
-                    icon = '<span class="material-symbols-outlined text-xs">check_circle</span>';
-                    break;
-                case 'FAILED':
-                    cls += 'bg-danger/10 text-danger';
-                    icon = '<span class="material-symbols-outlined text-xs">error</span>';
-                    break;
-                default:
-                    cls += 'bg-primary/10 text-primary';
-                    icon = '<span class="material-symbols-outlined text-xs animate-spin">sync</span>';
-            }
-
-            badge.className = cls;
-            badge.innerHTML = icon + ' ' + label;
-        }
-
-        // ========== View existing pipeline ==========
-        async function viewPipeline(id) {
-            try {
-                const resp = await fetch('/devops/pipeline/' + id + '/status');
-                const data = await resp.json();
-                if (data.success) {
-                    activatePipeline(id, {
-                        gitUrl: data.gitUrl,
-                        branch: data.branch,
-                        imageName: data.imageName,
-                        imageTag: '',
-                        namespace: '',
-                        deploymentName: ''
-                    });
-                }
-            } catch (e) {
-                console.error('Failed to view pipeline:', e);
+            if (!badge) return;
+            badge.textContent = label;
+            badge.className = 'px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1 ';
+            if (status === 'SUCCESS') {
+                badge.className += 'bg-success/10 text-success';
+            } else if (status === 'FAILED') {
+                badge.className += 'bg-danger/10 text-danger';
+            } else {
+                badge.className += 'bg-primary/10 text-primary';
             }
         }
 
-        // ========== Refresh History ==========
-        async function refreshPipelines() {
-            try {
-                const resp = await fetch('/devops/pipelines');
-                const data = await resp.json();
-
-                const container = document.getElementById('pipelineHistory');
-
-                if (data.length === 0) {
-                    container.innerHTML = `
-                        <div class="p-12 text-center">
-                            <span class="material-symbols-outlined text-5xl text-slate-300 mb-3">rocket_launch</span>
-                            <p class="text-slate-400 text-sm">暂无流水线记录</p>
-                        </div>`;
-                } else {
-                    container.innerHTML = data.map(run => `
-                        <div class="px-6 py-4 border-b border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer flex items-center justify-between"
-                             onclick="viewPipeline('${run.id}')">
-                            <div class="flex items-center gap-4">
-                                <div class="size-9 rounded-lg flex items-center justify-center ${run.status === 'SUCCESS' ? 'bg-success text-white' :
-                            run.status === 'FAILED' ? 'bg-danger text-white' : 'bg-primary text-white'
-                        }">
-                                    <span class="material-symbols-outlined text-lg">${run.status === 'SUCCESS' ? 'check' :
-                            run.status === 'FAILED' ? 'close' : 'sync'
-                        }</span>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-semibold text-slate-900">
-                                        #${run.id}
-                                        <span class="font-normal text-slate-500"> — ${run.imageName || ''}</span>
-                                    </p>
-                                    <p class="text-xs text-slate-400">${run.startTime}</p>
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-4">
-                                <span class="text-xs font-mono text-slate-500">${run.duration}</span>
-                                <span class="px-2 py-0.5 rounded-full text-xs font-bold ${run.status === 'SUCCESS' ? 'bg-success/10 text-success' :
-                            run.status === 'FAILED' ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary'
-                        }">${run.statusLabel}</span>
-                            </div>
-                        </div>
-                    `).join('');
-                }
-
-                document.getElementById('historyCount').textContent = data.length + ' 条记录';
-            } catch (e) {
-                console.error('Failed to refresh:', e);
-            }
-        }
-
-        // ========== Close Active Panel ==========
         function closeActivePanel() {
-            document.getElementById('activePipelinePanel').classList.add('hidden');
+            document.getElementById('activeReleasePanel').classList.add('hidden');
             if (currentEventSource) {
                 currentEventSource.close();
                 currentEventSource = null;
             }
         }
 
-        // ========== Auto-refresh duration for running pipelines ==========
-        setInterval(function () {
-            if (currentPipelineId && currentEventSource) {
-                // Duration is updated via SSE, no need for polling
+        // ========== View Existing Release ==========
+        async function viewRelease(id) {
+            try {
+                const resp = await fetch('/release/' + id + '/status');
+                const data = await resp.json();
+                if (data.success) {
+                    activateRelease(id, {
+                        gitUrl: data.gitUrl,
+                        branch: data.branch,
+                        imageName: data.imageName,
+                        imageTag: 'latest',
+                        namespace: 'default',
+                        harborProject: 'library'
+                    });
+                }
+            } catch (e) {
+                console.error('View release error:', e);
             }
-        }, 1000);
+        }
+
+        // ========== Refresh ==========
+        async function refreshReleases() {
+            try {
+                const resp = await fetch('/release/list');
+                const releases = await resp.json();
+                const container = document.getElementById('releaseHistory');
+                document.getElementById('historyCount').textContent = releases.length + ' 条记录';
+
+                if (releases.length === 0) {
+                    container.innerHTML = `
+                        <div class="p-12 text-center">
+                            <span class="material-symbols-outlined text-5xl text-slate-300 mb-3">deployed_code</span>
+                            <p class="text-slate-400 text-sm">暂无发布记录</p>
+                            <p class="text-slate-300 text-xs mt-1">点击右上角「新建发布」开始第一次应用发布</p>
+                        </div>`;
+                    return;
+                }
+
+                container.innerHTML = releases.map(r => {
+                    const statusClass = r.status === 'SUCCESS' ? 'bg-success text-white' :
+                        r.status === 'FAILED' ? 'bg-danger text-white' : 'bg-primary text-white';
+                    const statusIcon = r.status === 'SUCCESS' ? 'check' :
+                        r.status === 'FAILED' ? 'close' : 'sync';
+                    const iconExtra = (r.status !== 'SUCCESS' && r.status !== 'FAILED') ? ' animate-spin' : '';
+                    const badgeClass = r.status === 'SUCCESS' ? 'bg-success/10 text-success' :
+                        r.status === 'FAILED' ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary';
+
+                    return `<div class="px-6 py-4 border-b border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer flex items-center justify-between"
+                                onclick="viewRelease('${r.id}')">
+                        <div class="flex items-center gap-4">
+                            <div class="size-9 rounded-lg flex items-center justify-center ${statusClass}">
+                                <span class="material-symbols-outlined text-lg${iconExtra}">${statusIcon}</span>
+                            </div>
+                            <div>
+                                <p class="text-sm font-semibold text-slate-900">#${r.id} <span class="font-normal text-slate-500"> — ${r.imageName}</span></p>
+                                <p class="text-xs text-slate-400">${r.startTime}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <span class="text-xs font-mono text-slate-500">${r.duration}</span>
+                            <span class="px-2 py-0.5 rounded-full text-xs font-bold ${badgeClass}">${r.statusLabel}</span>
+                        </div>
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                console.error('Refresh error:', e);
+            }
+        }
     </script>
 </body>
 

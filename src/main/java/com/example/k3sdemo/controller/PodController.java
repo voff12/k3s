@@ -83,7 +83,7 @@ public class PodController {
             model.addAttribute("namespace", targetNamespace);
 
             // Populate filter options (mock for now, could be dynamic)
-            model.addAttribute("namespaces", List.of("default", "kube-system"));
+            model.addAttribute("namespaces", List.of("default", "kube-system", "harbor"));
 
         } catch (Exception e) {
             model.addAttribute("error", "Failed to connect to Kubernetes: " + e.getMessage());
