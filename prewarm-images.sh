@@ -3,17 +3,16 @@
 # K3s 流水线基础镜像一键预热脚本
 # 在 K3s 节点上执行一次，之后流水线完全不依赖外网
 #
-# 三阶段:
+# 两阶段:
 #   1. 流水线 Job 容器镜像 → K3s containerd (已有则跳过)
-#   2. 部署本地 Registry (localhost:5000)
-#   3. 基础镜像 → localhost:5000 (优先从 containerd 本地推送)
+#   2. 基础镜像 → /opt/kaniko-base-images/ (Docker V2 tar)
+#      Kaniko 直接从宿主机 tar 文件加载, 不需要 Registry
 #
 # 用法: sudo bash prewarm-images.sh
 # ============================================================
 set -e
 
 CTR="ctr -a /run/k3s/containerd/containerd.sock -n k8s.io"
-KUBECTL="kubectl"
 
 # ============================================================
 # 第一部分: 流水线 Job 容器镜像 (导入 containerd)
@@ -23,20 +22,16 @@ JOB_IMAGES=(
     "docker.io/library/maven:3.9-eclipse-temurin-17|docker.m.daocloud.io/library/maven:3.9-eclipse-temurin-17|docker.xuanyuan.me/library/maven:3.9-eclipse-temurin-17"
     "registry.aliyuncs.com/kaniko-project/executor:latest|registry.aliyuncs.com/kaniko-project/executor:latest"
     "docker.io/rancher/k3s:latest|registry.cn-hangzhou.aliyuncs.com/rancher/k3s:v1.28.4-k3s2|docker.m.daocloud.io/rancher/k3s:latest"
-    "docker.io/library/registry:2|registry.cn-hangzhou.aliyuncs.com/library/registry:2|docker.m.daocloud.io/library/registry:2"
 )
 
 # ============================================================
-# 第二部分: Dockerfile FROM 基础镜像 (推到 localhost:5000)
-# 格式: "原始名|containerd中可能的tag1|containerd中可能的tag2|外网源1|外网源2"
-# 优先从 containerd 本地已有镜像推送，全部没有才走外网
+# 第二部分: Dockerfile FROM 基础镜像 (导出到宿主机目录)
 # ============================================================
 BASE_IMAGES=(
     "eclipse-temurin:17-jdk-jammy"
     "maven:3.9-eclipse-temurin-17"
 )
 
-# containerd 中可能的镜像名 (docker save/import 后的名字可能不同)
 TEMURIN_LOCAL_NAMES=(
     "docker.io/library/eclipse-temurin:17-jdk-jammy"
     "eclipse-temurin:17-jdk-jammy"
@@ -57,6 +52,9 @@ MAVEN_REMOTE_SOURCES=(
     "docker.xuanyuan.me/library/maven:3.9-eclipse-temurin-17"
 )
 
+# 基础镜像导出目录
+BASE_DIR="/opt/kaniko-base-images"
+
 # 通用: 从多源拉取并 tag
 pull_with_fallback() {
     local TARGET="$1"; shift
@@ -73,7 +71,7 @@ pull_with_fallback() {
 }
 
 echo "========================================================"
-echo " K3s 流水线镜像预热 (离线模式)"
+echo " K3s 流水线镜像预热 (离线模式, 无需 Registry)"
 echo "========================================================"
 echo ""
 
@@ -109,96 +107,40 @@ done
 echo "阶段1: 成功 $((TOTAL1 - FAILED1))/$TOTAL1"
 echo ""
 
-# ──────────── 阶段2: 本地 Registry ────────────
-echo "===== 阶段2: 本地 Registry (localhost:5000) ====="
+# ──────────── 阶段2: 基础镜像 → 宿主机 tar 文件 ────────────
+echo "===== 阶段2: 基础镜像 → $BASE_DIR (Docker tar) ====="
+echo ""
+echo "[策略] 从 containerd 导出 Docker 格式 tar, Kaniko 通过 HostPath 直接加载"
 echo ""
 
-if curl -s http://localhost:5000/v2/ > /dev/null 2>&1; then
-    echo "[SKIP] Registry 已运行"
-else
-    echo "[INFO] 部署本地 Registry..."
-    cat <<'YAML' | $KUBECTL apply -f -
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: local-registry
-  namespace: default
-  labels:
-    app: local-registry
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: local-registry
-  template:
-    metadata:
-      labels:
-        app: local-registry
-    spec:
-      hostNetwork: true
-      containers:
-        - name: registry
-          image: registry:2
-          imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 5000
-              hostPort: 5000
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/registry
-          env:
-            - name: REGISTRY_STORAGE_DELETE_ENABLED
-              value: "true"
-      volumes:
-        - name: data
-          hostPath:
-            path: /opt/local-registry
-            type: DirectoryOrCreate
-YAML
+mkdir -p "$BASE_DIR"
 
-    echo "[INFO] 等待 Registry 就绪..."
-    for i in $(seq 1 60); do
-        if curl -s http://localhost:5000/v2/ > /dev/null 2>&1; then
-            echo "[OK] Registry 就绪"
-            break
-        fi
-        [ "$i" -eq 60 ] && { echo "[ERROR] Registry 启动超时"; exit 1; }
-        sleep 3
-    done
-fi
-echo ""
-
-# ──────────── 阶段3: 基础镜像 → localhost:5000 ────────────
-echo "===== 阶段3: 基础镜像 → localhost:5000 ====="
-echo ""
-echo "[策略] 优先从 containerd 本地已有镜像推送，不走外网"
-echo ""
-
-FAILED3=0
+FAILED2=0
 IDX=0
-TOTAL=${#BASE_IMAGES[@]}
+TOTAL2=${#BASE_IMAGES[@]}
 
-# 通用推送函数: push_base_image <原始镜像名> <本地名列表名> <远程源列表名> <模糊关键词>
-push_base_image() {
+# 通用导出函数
+export_base_image() {
     local ORIGINAL="$1"
     local -n LOCAL_NAMES_REF="$2"
     local -n REMOTE_SOURCES_REF="$3"
     local FUZZY_KEY1="$4"
     local FUZZY_KEY2="$5"
-    local LOCAL_REF="localhost:5000/library/${ORIGINAL}"
-    IDX=$((IDX + 1))
-    echo "[$IDX/$TOTAL] $ORIGINAL → $LOCAL_REF"
 
-    # 1) 检查 localhost:5000 是否已有
-    local REPO="library/${ORIGINAL%%:*}"
-    local TAG="${ORIGINAL##*:}"
-    if curl -s "http://localhost:5000/v2/${REPO}/tags/list" 2>/dev/null | grep -q "$TAG"; then
-        echo "        [SKIP] 本地 Registry 已存在"
+    # tar 文件名: eclipse-temurin_17-jdk-jammy.tar
+    local TAR_NAME=$(echo "$ORIGINAL" | tr ':/' '_').tar
+    local TAR_PATH="$BASE_DIR/$TAR_NAME"
+    IDX=$((IDX + 1))
+    echo "[$IDX/$TOTAL2] $ORIGINAL → $TAR_PATH"
+
+    # 1) 检查 tar 是否已存在
+    if [ -f "$TAR_PATH" ] && [ -s "$TAR_PATH" ]; then
+        echo "        [SKIP] tar 文件已存在 ($(du -h "$TAR_PATH" | cut -f1))"
         echo ""
         return 0
     fi
 
-    # 2) 优先: 在 containerd 中查找已有镜像
+    # 2) 在 containerd 中查找镜像
     local FOUND_LOCAL=""
     echo "        查找 containerd 本地镜像..."
     for NAME in "${LOCAL_NAMES_REF[@]}"; do
@@ -218,44 +160,42 @@ push_base_image() {
         fi
     fi
 
-    if [ -n "$FOUND_LOCAL" ]; then
-        echo "        推送到 localhost:5000 (本地 → 本地, 不走外网)..."
-        $CTR images tag "$FOUND_LOCAL" "$LOCAL_REF" 2>/dev/null || true
-        if $CTR images push --plain-http "$LOCAL_REF" > /dev/null 2>&1; then
-            echo "        [OK] 推送成功 (零外网流量)"
-        else
-            echo "        [FAIL] 推送失败"
-            FAILED3=$((FAILED3 + 1))
-        fi
-    else
-        # 3) 本地没有, 从外网拉
+    # 3) 本地没有则外网拉取
+    if [ -z "$FOUND_LOCAL" ]; then
         echo "        containerd 中未找到, 尝试从外网拉取..."
-        local PULLED=false
         for SRC in "${REMOTE_SOURCES_REF[@]}"; do
             echo "        拉取: $SRC"
             if $CTR images pull "$SRC" > /dev/null 2>&1; then
-                $CTR images tag "$SRC" "$LOCAL_REF" 2>/dev/null || true
-                if $CTR images push --plain-http "$LOCAL_REF" > /dev/null 2>&1; then
-                    echo "        [OK] 拉取+推送成功"
-                    PULLED=true
-                    break
-                fi
+                FOUND_LOCAL="$SRC"
+                echo "        [OK] 拉取成功"
+                break
             fi
             echo "        [FAIL] 不可用"
         done
-        if [ "$PULLED" = false ]; then
-            echo "        [FAIL] 全部失败!"
-            FAILED3=$((FAILED3 + 1))
-        fi
+    fi
+
+    if [ -z "$FOUND_LOCAL" ]; then
+        echo "        [FAIL] 全部失败! 无法获取 $ORIGINAL"
+        FAILED2=$((FAILED2 + 1))
+        echo ""
+        return 1
+    fi
+
+    # 4) 导出为 Docker 格式 tar
+    echo "        导出为 Docker tar (--platform linux/amd64)..."
+    if $CTR images export --platform linux/amd64 "$TAR_PATH" "$FOUND_LOCAL" 2>/dev/null; then
+        echo "        [OK] 导出成功 ($(du -h "$TAR_PATH" | cut -f1))"
+    else
+        echo "        [FAIL] 导出失败"
+        rm -f "$TAR_PATH"
+        FAILED2=$((FAILED2 + 1))
     fi
     echo ""
 }
 
-# 推送 eclipse-temurin
-push_base_image "eclipse-temurin:17-jdk-jammy" TEMURIN_LOCAL_NAMES TEMURIN_REMOTE_SOURCES "eclipse-temurin" "17-jdk-jammy"
-# 推送 maven (多阶段 Dockerfile 需要)
-push_base_image "maven:3.9-eclipse-temurin-17" MAVEN_LOCAL_NAMES MAVEN_REMOTE_SOURCES "maven" "3.9-eclipse-temurin-17"
-echo "阶段3: 成功 $((${#BASE_IMAGES[@]} - FAILED3))/${#BASE_IMAGES[@]}"
+export_base_image "eclipse-temurin:17-jdk-jammy" TEMURIN_LOCAL_NAMES TEMURIN_REMOTE_SOURCES "eclipse-temurin" "17-jdk-jammy"
+export_base_image "maven:3.9-eclipse-temurin-17" MAVEN_LOCAL_NAMES MAVEN_REMOTE_SOURCES "maven" "3.9-eclipse-temurin-17"
+echo "阶段2: 成功 $((TOTAL2 - FAILED2))/$TOTAL2"
 echo ""
 
 # ──────────── 验证 ────────────
@@ -270,17 +210,18 @@ for ENTRY in "${JOB_IMAGES[@]}"; do
     if $CTR images ls -q | grep -q "^${T}$"; then echo "  [OK] $T"; else echo "  [!!] $T"; fi
 done
 echo ""
-echo "基础镜像 (localhost:5000):"
+echo "基础镜像 ($BASE_DIR):"
 for ORIGINAL in "${BASE_IMAGES[@]}"; do
-    R="library/${ORIGINAL%%:*}"; G="${ORIGINAL##*:}"
-    if curl -s "http://localhost:5000/v2/${R}/tags/list" 2>/dev/null | grep -q "$G"; then
-        echo "  [OK] localhost:5000/$R:$G"
+    TAR_NAME=$(echo "$ORIGINAL" | tr ':/' '_').tar
+    TAR_PATH="$BASE_DIR/$TAR_NAME"
+    if [ -f "$TAR_PATH" ] && [ -s "$TAR_PATH" ]; then
+        echo "  [OK] $TAR_PATH ($(du -h "$TAR_PATH" | cut -f1))"
     else
-        echo "  [!!] localhost:5000/$R:$G"
+        echo "  [!!] $TAR_PATH (不存在)"
     fi
 done
 
-TOTAL_FAIL=$((FAILED1 + FAILED3))
+TOTAL_FAIL=$((FAILED1 + FAILED2))
 if [ $TOTAL_FAIL -gt 0 ]; then
     echo ""
     echo "手动补救:"
@@ -294,8 +235,9 @@ if [ $TOTAL_FAIL -gt 0 ]; then
     echo "  # 在 K3s 节点上:"
     echo "  k3s ctr images import temurin.tar"
     echo "  k3s ctr images import maven.tar"
-    echo "  # 然后重新执行本脚本即可自动推送到 localhost:5000"
+    echo "  # 然后重新执行本脚本"
 fi
 
 echo ""
-echo "[INFO] 完成! 流水线完全离线运行"
+echo "[INFO] 完成! 基础镜像已导出到 $BASE_DIR"
+echo "[INFO] 流水线将通过 HostPath 挂载直接使用, 无需 Registry"

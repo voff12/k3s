@@ -1,0 +1,23 @@
+# Build artifacts (built inside Docker now)
+target/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Git
+.git/
+.github/
+.gitignore
+
+# Docker artifacts
+*.tar
+Dockerfile
+.dockerignore
+
+# Misc
+*.md
+build.sh
+*.sh
+!src/**

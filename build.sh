@@ -1,11 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🔹 Building Spring Boot Application..."
-# Use system maven since mvnw was missing/failed
-mvn clean package -DskipTests
-
-echo "🔹 Building Docker Image..."
+echo "🔹 Building Docker Image (multi-stage, includes Maven build)..."
 docker buildx build --platform linux/amd64 -t k3s:v1 .
 docker save -o k3s.tar k3s:v1
 

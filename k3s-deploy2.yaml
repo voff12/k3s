@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # Deployment 的名称，可以自定义
+  name: springboot-app
+  namespace: default
+  labels:
+    app: springboot-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: springboot-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # 滚动更新时最多多出 1 个 Pod
+      maxUnavailable: 0    # 确保零停机
+  template:
+    metadata:
+      labels:
+        app: springboot-app
+    spec:
+      # ── 优雅关闭：给 JVM 30s 处理请求 + 5s 缓冲 ──
+      terminationGracePeriodSeconds: 35
+
+      containers:
+        - name: springboot-container
+          # 【重点 1】必须和你 import 时显示的名称完全一致
+          image: docker.io/library/k3s:v1
+
+          # 【重点 2】必须设为 Never，表示仅使用本地导入的镜像，不去网上下载
+          imagePullPolicy: Never
+
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: management
+              containerPort: 8081
+              protocol: TCP
+
+          # ── 存活探针：检测应用是否卡死，失败则重启 Pod ──
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: management
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # ── 就绪探针：检测应用是否可接受流量 ──
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: management
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # ── 启动探针：防止慢启动时被 liveness 误杀 ──
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: management
+            periodSeconds: 5
+            failureThreshold: 30       # 最多等 5×30 = 150 秒启动
+            timeoutSeconds: 3
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+          # ── 环境变量（可覆盖 Dockerfile 默认值） ──
+          env:
+            - name: JAVA_OPTS
+              value: >-
+                -XX:+UseContainerSupport
+                -XX:MaxRAMPercentage=75.0
+                -XX:InitialRAMPercentage=50.0
+                -Djava.security.egd=file:/dev/./urandom
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: springboot-svc
+spec:
+  # 使用 NodePort 类型，方便通过 服务器IP:30082 访问
+  type: NodePort
+  selector:
+    app: springboot-app
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080       # Service 内部端口
+      targetPort: http # 容器端口 (SpringBoot 端口)
+      nodePort: 30082  # 【访问端口】浏览器访问 http://服务器IP:30082
