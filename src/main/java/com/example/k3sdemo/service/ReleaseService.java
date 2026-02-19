@@ -262,7 +262,7 @@ public class ReleaseService {
         // 基础镜像 (通过 Harbor 代理缓存,避免 Docker Hub 超时)
         String baseImage = (releaseBaseImage != null && !releaseBaseImage.isEmpty())
                 ? releaseBaseImage
-                : harborHost + "/library/eclipse-temurin:17-jre-jammy";
+                : harborHost + "/library/eclipse-temurin:17-jdk-jar";
 
         // Build 容器命令: Clone → Maven → Dockerfile.release → Docker Config
         StringBuilder buildCmdBuilder = new StringBuilder();
