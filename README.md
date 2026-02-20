@@ -15,6 +15,7 @@
 | 内存管理 | 集群内存分析 | 节点/Pod 内存排行、AI 优化建议、一键调整 |
 | 存储管理 | PV/磁盘概览 | PersistentVolume 状态、节点磁盘用量 |
 | CI/CD 流水线 | 代码到部署全链路 | Git → Maven → Kaniko → K3s，实时日志流 |
+| 应用发布 | Git 到 Harbor 到 K3s | Git 克隆 → Maven 构建 → Kaniko 推送 Harbor → K3s 部署 |
 | AI 工具 | Kubernetes 智能问答 | 基于通义千问，流式响应，Markdown 渲染 |
 
 ---
@@ -53,15 +54,19 @@ k3s/
 │   │   ├── MemoryController.java    # 内存管理 (/memory)
 │   │   ├── StoreController.java     # 存储管理 (/store)
 │   │   ├── DevOpsController.java    # CI/CD 流水线 (/devops)
+│   │   ├── ReleaseController.java   # 应用发布 (/release)
 │   │   └── AiToolsController.java   # AI 工具 (/aitools)
 │   ├── service/
 │   │   ├── DevOpsService.java       # 流水线编排引擎
+│   │   ├── ReleaseService.java      # 发布服务（Git → Harbor → K3s）
 │   │   └── QwenService.java         # 通义千问 AI 服务
 │   ├── handler/
 │   │   └── TerminalWebSocketHandler.java  # Pod 终端
 │   └── model/                       # 视图模型
 │       ├── PipelineConfig.java      # 流水线配置
 │       ├── PipelineRun.java         # 流水线运行状态
+│       ├── ReleaseConfig.java       # 发布配置
+│       ├── ReleaseRecord.java       # 发布记录
 │       └── ...ViewModel.java        # 各页面视图模型
 │
 └── src/main/resources/
@@ -74,6 +79,7 @@ k3s/
         ├── memory.html              # 内存管理
         ├── store.html               # 存储管理
         ├── devops.html              # CI/CD 流水线
+        ├── release.html             # 应用发布
         └── aitools.html             # AI 工具
 ```
 
@@ -110,6 +116,12 @@ k8s.kubeconfig=/etc/rancher/k3s/k3s.yaml
 # 通义千问 API（可选，用于 AI 功能）
 qwen.api.key=你的API密钥
 qwen.api.model=qwen-max
+
+# Harbor 镜像仓库（发布功能必需）
+harbor.host=harbor.local:30002
+harbor.ip=你的Harbor服务器IP
+harbor.username=admin
+harbor.password=你的Harbor密码
 ```
 
 ### 4. 构建运行
@@ -121,13 +133,130 @@ java -jar target/k3s-1.0.0-SNAPSHOT.jar
 
 访问 http://localhost:8080
 
-### 5. Docker 部署（可选）
+### 5. 使用应用发布功能
+
+配置 Harbor 后，访问 `/release` 页面即可使用应用发布功能：
+
+1. **填写发布配置**：
+   - Git 仓库地址（必填）
+   - 镜像名称（必填）
+   - Deployment 名称（可选，留空则仅构建推送镜像）
+   - Harbor 项目（默认：library）
+
+2. **触发发布**：
+   - 系统自动执行：Git 克隆 → Maven 构建 → Kaniko 构建 → 推送 Harbor → 部署 K3s
+
+3. **查看实时日志**：
+   - 页面实时显示构建和部署日志
+   - 支持 SSE 流式推送
+
+### 6. Docker 部署（可选）
 
 ```bash
 bash build.sh
 # 生成 k3s.tar，传输到 K3s 节点后导入:
 k3s ctr images import k3s.tar
 ```
+
+---
+
+## 应用发布
+
+### 发布功能概述
+
+应用发布功能提供从 Git 代码仓库到 Harbor 镜像仓库再到 K3s 集群的完整自动化流程，支持一键构建、推送和部署。
+
+### 发布流程架构
+
+```
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│  Git Clone  │───▶│ Maven Build  │───▶│ Kaniko Build │
+│  克隆代码仓库  │    │ Maven 编译打包 │    │ 构建容器镜像  │
+└──────────────┘    └──────────────┘    └──────────────┘
+                                              │
+      ┌──────────────┐    ┌──────────────┐    ▼
+      │ K3s Deploy   │◀───│ Push Harbor  │◀───┌──────────────┐
+      │ 部署到集群    │    │ 推送到 Harbor │    │ Dockerfile   │
+      │ (自动创建/更新)│    │ (认证已配置)  │    │ 自动生成      │
+      └──────────────┘    └──────────────┘    └──────────────┘
+```
+
+### 发布流程特性
+
+- **两步自动化流程**：
+  1. **构建发布阶段**：Git 克隆 → Maven 构建 → 自动生成 Dockerfile → Kaniko 构建镜像 → 推送到 Harbor
+  2. **K3s 部署阶段**：自动更新或创建 Deployment → 滚动更新 → 状态监控
+
+- **Harbor 集成**：
+  - 自动配置 Harbor 认证（Base64 编码）
+  - 支持自定义 Harbor 项目和命名空间
+  - 镜像自动推送到 `harbor.host/project/imageName:tag`
+
+- **智能 Deployment 管理**：
+  - **自动命名**：如果未指定 Deployment 名称，自动使用镜像名称（符合 K8s 命名规范）
+  - **自动创建**：如果 Deployment 不存在，自动创建基本配置
+  - **自动更新**：如果 Deployment 存在，自动更新镜像并触发滚动更新
+  - 支持自定义命名空间和资源限制
+
+- **实时日志流**：
+  - SSE 流式推送构建和部署日志
+  - 实时显示每个步骤的执行状态
+  - 支持错误诊断和超时保护（30 分钟）
+
+- **灵活配置**：
+  - 支持自定义 Git 分支、镜像标签、Harbor 项目
+  - 支持私有 Git 仓库（Token 认证）
+  - 支持自定义 Maven 构建命令
+  - 可选 Deployment 名称（留空则仅构建推送镜像）
+
+### 发布配置参数
+
+| 参数 | 说明 | 默认值 | 必填 |
+|------|------|--------|------|
+| `gitUrl` | Git 仓库地址 | - | ✅ |
+| `branch` | Git 分支名 | main | - |
+| `imageName` | 镜像名称 | - | ✅ |
+| `imageTag` | 镜像标签 | latest | - |
+| `namespace` | K8s 命名空间 | default | - |
+| `deploymentName` | Deployment 名称 | 自动使用镜像名称 | ⚠️ 留空则自动生成 |
+| `harborProject` | Harbor 项目 | library | - |
+| `buildCommand` | Maven 构建命令 | mvn clean package -DskipTests | - |
+| `gitToken` | Git 认证 Token | - | - |
+
+### 使用示例
+
+1. **自动部署**（推荐）：
+   - 填写 Git 仓库地址和镜像名称（如 `hello`）
+   - Deployment 名称留空，系统会自动使用镜像名称作为 Deployment 名称
+   - 系统会构建镜像、推送到 Harbor，并自动创建或更新 Deployment
+
+2. **部署到现有 Deployment**：
+   - 填写 Git 仓库地址、镜像名称和指定的 Deployment 名称（如 `springboot-app`）
+   - 系统会更新该 Deployment 的镜像并触发滚动更新
+
+3. **自定义 Deployment 名称**：
+   - 填写 Git 仓库地址、镜像名称和自定义 Deployment 名称（如 `my-app`）
+   - 系统会使用指定的名称创建或更新 Deployment
+
+**注意**：Deployment 名称会自动转换为符合 K8s 命名规范的格式（小写字母、数字、连字符）。
+
+### Harbor 认证配置
+
+发布功能需要正确配置 Harbor 认证信息：
+
+```properties
+# Harbor 镜像仓库配置
+harbor.host=harbor.local:30002
+harbor.ip=60.205.252.82          # Harbor 服务器 IP（用于 Pod 内域名解析）
+harbor.project=library           # 默认 Harbor 项目
+harbor.username=admin             # Harbor 用户名
+harbor.password=Harbor12345      # Harbor 密码
+```
+
+**重要提示**：
+- 确保 Harbor 用户对指定项目有 **push** 权限
+- Harbor 认证使用 Base64 编码，自动处理
+- 如果 Harbor 使用自签名证书，Kaniko 会自动跳过 TLS 验证
 
 ---
 
@@ -152,7 +281,7 @@ k3s ctr images import k3s.tar
 
 - **6 步全自动**: 代码克隆 → Maven 打包 → Dockerfile 处理 → Kaniko 构建 → 导入 K3s → 更新 Deployment
 - **离线模式**: 基础镜像从 `localhost:5000` 拉取，无需外网
-- **智能 Dockerfile**: 自动检测基础镜像可用性，不可用时自动生成基于 `eclipse-temurin:17-jdk-jammy` 的 Dockerfile
+- **智能 Dockerfile**: 自动检测基础镜像可用性，不可用时自动生成基于 `eclipse-temurin:17-jre-jammy` 的 Dockerfile
 - **实时日志**: SSE 流式推送，前端实时展示构建进度
 - **多层防御**: API 提交防御、Pod 调度防御、构建失败诊断、30 分钟超时保护
 - **私有仓库支持**: GitLab/GitHub Token 认证
@@ -172,7 +301,7 @@ sudo bash prewarm-images.sh
 |------|------|------|
 | 阶段 1 | Job 容器镜像 → K3s containerd | Alpine、Maven、Kaniko、K3s loader、Registry |
 | 阶段 2 | 部署本地 Registry | `localhost:5000`，存储在 `/opt/local-registry` |
-| 阶段 3 | 基础镜像 → localhost:5000 | `eclipse-temurin:17-jdk-jammy`，优先本地推送 |
+| 阶段 3 | 基础镜像 → localhost:5000 | `eclipse-temurin:17-jre-jammy`，优先本地推送 |
 
 镜像源优先级：本地 containerd → 阿里云 → DaoCloud → xuanyuan.me → Docker Hub
 
@@ -241,6 +370,16 @@ sudo bash prewarm-images.sh
 | GET | `/devops/pipeline/{id}/status` | 流水线状态（JSON） |
 | GET | `/devops/pipelines` | 流水线列表（JSON） |
 
+### 应用发布
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/release` | 发布管理页面 |
+| POST | `/release/run` | 触发发布（JSON Body: ReleaseConfig） |
+| GET | `/release/{id}/stream` | SSE 实时日志流 |
+| GET | `/release/{id}/status` | 发布状态（JSON） |
+| GET | `/release/list` | 发布记录列表（JSON） |
+
 ### AI 工具
 
 | 方法 | 路径 | 说明 |
@@ -271,10 +410,11 @@ qwen.api.url=https://dashscope.aliyuncs.com/compatible-mode/v1
 qwen.api.model=qwen-max          # 可选: qwen-plus / qwen-turbo
 
 # ==================== Harbor 镜像仓库 ====================
-harbor.host=harbor.local
-harbor.project=library
-harbor.username=admin
-harbor.password=Harbor12345
+harbor.host=harbor.local:30002    # Harbor 地址（含端口）
+harbor.ip=60.205.252.82           # Harbor IP（用于 Pod 内域名解析）
+harbor.project=library             # 默认 Harbor 项目
+harbor.username=admin              # Harbor 用户名
+harbor.password=Harbor12345        # Harbor 密码（确保有 push 权限）
 
 # ==================== Git 配置（可选）====================
 gitlab.token=                     # 私有仓库 Token
@@ -286,6 +426,9 @@ kaniko.image=registry.aliyuncs.com/kaniko-project/executor:latest
 git.image=alpine:3.19
 maven.image=maven:3.9-eclipse-temurin-17
 loader.image=rancher/k3s:latest
+
+# ==================== 发布功能（可选）====================
+release.base-image=                # 自定义基础镜像（留空使用 Harbor 中的镜像）
 ```
 
 ---
@@ -367,6 +510,111 @@ sudo bash prewarm-images.sh
 # 5. 启动应用
 java -jar k3s-1.0.0-SNAPSHOT.jar
 ```
+
+---
+
+## 故障排查
+
+### Harbor 推送失败：UNAUTHORIZED
+
+**问题**：镜像推送到 Harbor 时出现 `unauthorized to access repository` 错误。
+
+**解决方案**：
+
+1. **检查 Harbor 凭据**：
+   ```bash
+   # 手动测试 Harbor 登录
+   docker login harbor.local:30002 -u admin -p Harbor12345
+   ```
+
+2. **验证项目权限**：
+   - 登录 Harbor Web 界面
+   - 确认用户对指定项目（如 `library`）有 **push** 权限
+   - 检查项目是否为公开项目或需要认证
+
+3. **检查配置**：
+   - 确认 `application.properties` 中的 Harbor 配置正确
+   - 检查 `harbor.host` 是否包含端口号（如 `harbor.local:30002`）
+   - 验证 `harbor.ip` 是否正确（用于 Pod 内域名解析）
+
+4. **查看发布日志**：
+   - 在发布页面查看详细错误信息
+   - 检查 Kaniko 容器的日志输出
+
+### Harbor 镜像拉取失败：ImagePullBackOff
+
+**问题**：Deployment 创建后，Pod 出现 `ImagePullBackOff` 错误，无法从 Harbor 拉取镜像。
+
+**解决方案**：
+
+系统已自动处理此问题：
+
+1. **自动创建 Harbor Secret**：
+   - 系统会在创建 Deployment 时自动创建 `harbor-registry-secret`
+   - Secret 包含 Harbor 认证信息（Base64 编码）
+
+2. **自动配置 imagePullSecrets**：
+   - 新创建的 Deployment 会自动添加 `imagePullSecrets`
+   - 现有 Deployment 更新时也会自动添加（如果缺失）
+
+3. **手动验证 Secret**（如需要）：
+   ```bash
+   # 检查 Secret 是否存在
+   kubectl get secret harbor-registry-secret -n default
+   
+   # 查看 Secret 详情
+   kubectl describe secret harbor-registry-secret -n default
+   ```
+
+4. **手动创建 Secret**（如果自动创建失败）：
+   ```bash
+   kubectl create secret docker-registry harbor-registry-secret \
+     --docker-server=harbor.local:30002 \
+     --docker-username=admin \
+     --docker-password=Harbor12345 \
+     --namespace=default
+   ```
+
+5. **检查 Pod 状态**：
+   ```bash
+   # 查看 Pod 事件
+   kubectl describe pod <pod-name> -n default
+   
+   # 查看 Pod 日志
+   kubectl logs <pod-name> -n default
+   ```
+
+### Deployment 未自动创建
+
+**问题**：镜像已推送，但 Deployment 未创建或更新。
+
+**解决方案**：
+
+- **自动命名**：如果未指定 Deployment 名称，系统会自动使用镜像名称（已转换为 K8s 命名规范）
+- **检查日志**：查看发布日志中的 Deployment 创建/更新信息
+- **命名规范**：Deployment 名称会自动转换（小写、去除特殊字符），确保符合 K8s 要求
+- **权限检查**：确认 RBAC 配置允许创建 Deployment（参考 `k8s-rbac.yaml`）
+- **手动检查**：使用 `kubectl get deployment -n <namespace>` 查看 Deployment 状态
+
+### Git 克隆失败
+
+**问题**：发布时 Git 克隆失败。
+
+**解决方案**：
+
+1. **私有仓库**：填写 `gitToken` 字段（GitLab/GitHub Personal Access Token）
+2. **网络问题**：配置 `git.proxy` 设置 HTTP 代理
+3. **分支不存在**：确认指定的分支名称正确
+
+### Kaniko 构建超时
+
+**问题**：镜像构建超过 30 分钟被终止。
+
+**解决方案**：
+
+- 检查 Dockerfile 是否优化（减少层数、使用缓存）
+- 确认基础镜像可用（从 Harbor 或本地 Registry 拉取）
+- 查看构建日志，定位具体卡住的步骤
 
 ---
 

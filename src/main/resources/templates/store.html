@@ -52,14 +52,19 @@
         <aside
             class="w-64 bg-white dark:bg-[#1a262f] border-r border-gray-200 dark:border-gray-800 flex flex-col shrink-0">
             <div class="p-6 flex items-center gap-3">
-                <div class="size-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg">
+                <div
+                    class="size-10 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
-                        <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 2.18l8 4v8.82c0 4.54-3.07 8.83-7.09 9.95C8.07 19.83 5 15.54 5 11V8.18l7-3.5z"/>
-                        <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>
+                        <path
+                            d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 2.18l8 4v8.82c0 4.54-3.07 8.83-7.09 9.95C8.07 19.83 5 15.54 5 11V8.18l7-3.5z" />
+                        <path
+                            d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm0 6c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z" />
                     </svg>
                 </div>
                 <div>
-                    <h1 class="text-base font-bold leading-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">灵犀平台</h1>
+                    <h1
+                        class="text-base font-bold leading-tight bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                        灵犀平台</h1>
                     <p class="text-xs text-gray-500 dark:text-gray-400">智能云管理平台</p>
                 </div>
             </div>
@@ -203,15 +208,17 @@
                             存储类与卷管理
                         </h3>
                         <div class="flex gap-1 bg-gray-200/50 dark:bg-gray-800 p-1 rounded-lg">
-                            <button
+                            <button id="tabPV" onclick="switchTab('pv')"
                                 class="px-4 py-1.5 bg-white dark:bg-gray-700 text-primary text-xs font-bold rounded-md shadow-sm">存储卷
                                 (PV)</button>
-                            <button
+                            <button id="tabPVC" onclick="switchTab('pvc')"
                                 class="px-4 py-1.5 text-gray-500 dark:text-gray-400 text-xs font-bold rounded-md hover:bg-gray-100/50 dark:hover:bg-gray-800 transition-colors">卷声明
                                 (PVC)</button>
                         </div>
                     </div>
-                    <div
+
+                    <!-- PV Table -->
+                    <div id="pvTable"
                         class="bg-white dark:bg-[#1a262f] rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
                         <table class="w-full text-left border-collapse">
                             <thead
@@ -274,6 +281,76 @@
                             </tbody>
                         </table>
                     </div>
+
+                    <!-- PVC Table -->
+                    <div id="pvcTable" style="display:none"
+                        class="bg-white dark:bg-[#1a262f] rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+                        <table class="w-full text-left border-collapse">
+                            <thead
+                                class="bg-background-light dark:bg-background-dark/50 border-b border-gray-200 dark:border-gray-800">
+                                <tr>
+                                    <th
+                                        class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                        声明名称</th>
+                                    <th
+                                        class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                        命名空间</th>
+                                    <th
+                                        class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                        状态</th>
+                                    <th
+                                        class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                        容量</th>
+                                    <th
+                                        class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                        访问模式</th>
+                                    <th
+                                        class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                        存储类</th>
+                                    <th
+                                        class="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                        绑定 PV</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+                                <tr th:each="pvc : ${pvcs}"
+                                    class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                    <td class="px-6 py-4">
+                                        <div class="flex items-center gap-3">
+                                            <span
+                                                class="material-symbols-outlined text-gray-400 text-lg">assignment</span>
+                                            <span class="text-sm font-medium" th:text="${pvc.name}">pvc-name</span>
+                                        </div>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <span
+                                            class="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs rounded"
+                                            th:text="${pvc.namespace}">default</span>
+                                    </td>
+                                    <td class="px-6 py-4">
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+                                            th:classappend="${pvc.statusColor}" th:text="${pvc.status}">
+                                            Bound
+                                        </span>
+                                    </td>
+                                    <td class="px-6 py-4 text-sm font-medium" th:text="${pvc.capacity}">2Gi</td>
+                                    <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400"
+                                        th:text="${pvc.accessMode}">RWO</td>
+                                    <td class="px-6 py-4 text-sm text-gray-600 dark:text-gray-400"
+                                        th:text="${pvc.storageClass}">local-path</td>
+                                    <td class="px-6 py-4">
+                                        <span th:if="${pvc.volumeName != '未绑定'}"
+                                            class="px-2 py-1 bg-primary/10 text-primary text-[10px] font-bold rounded flex items-center gap-1 w-fit">
+                                            <span class="material-symbols-outlined text-[12px]">hard_drive</span>
+                                            <span th:text="${pvc.volumeName}">pv-name</span>
+                                        </span>
+                                        <span th:if="${pvc.volumeName == '未绑定'}"
+                                            class="text-sm text-gray-400 italic">未绑定</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </section>
                 <!-- Section 3: 物理磁盘监控 -->
                 <section>
@@ -325,6 +402,29 @@
             </div>
         </main>
     </div>
+
+    <script>
+        function switchTab(tab) {
+            const pvTable = document.getElementById('pvTable');
+            const pvcTable = document.getElementById('pvcTable');
+            const tabPV = document.getElementById('tabPV');
+            const tabPVC = document.getElementById('tabPVC');
+            const activeClass = 'px-4 py-1.5 bg-white dark:bg-gray-700 text-primary text-xs font-bold rounded-md shadow-sm';
+            const inactiveClass = 'px-4 py-1.5 text-gray-500 dark:text-gray-400 text-xs font-bold rounded-md hover:bg-gray-100/50 dark:hover:bg-gray-800 transition-colors';
+
+            if (tab === 'pv') {
+                pvTable.style.display = '';
+                pvcTable.style.display = 'none';
+                tabPV.className = activeClass;
+                tabPVC.className = inactiveClass;
+            } else {
+                pvTable.style.display = 'none';
+                pvcTable.style.display = '';
+                tabPV.className = inactiveClass;
+                tabPVC.className = activeClass;
+            }
+        }
+    </script>
 </body>
 
 </html>

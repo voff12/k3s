@@ -16,18 +16,17 @@ RUN --mount=type=cache,target=/root/.m2 \
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2 \
     mvn package -DskipTests -B && \
-    # 提取分层 JAR，进一步优化镜像层
+    # 提取分层 JAR 进一步优化镜像层
     java -Djarmode=layertools -jar target/k3s-1.0.0-SNAPSHOT.jar extract --destination /extracted
 
 # ============================================================
-# Stage 2: Runtime — 仅含 JRE，体积约 150MB
+# Stage 2: Runtime — JRE Alpine，体积更小（约 180MB）
 # ============================================================
-FROM eclipse-temurin:17-jre-jammy AS runtime
+FROM eclipse-temurin:17-jre-alpine AS runtime
 
 # 安全：创建非 root 用户 + 安装 curl（用于健康检查）
-RUN groupadd -r appgroup && useradd -r -g appgroup -d /app -s /sbin/nologin appuser && \
-    apt-get update && apt-get install -y --no-install-recommends curl && \
-    rm -rf /var/lib/apt/lists/*
+RUN addgroup -S appgroup && adduser -S -G appgroup -D -h /app -s /bin/false appuser && \
+    apk add --no-cache curl
 
 WORKDIR /app
 

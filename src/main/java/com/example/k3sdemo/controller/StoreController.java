@@ -1,10 +1,12 @@
 package com.example.k3sdemo.controller;
 
 import com.example.k3sdemo.model.NodeDiskViewModel;
+import com.example.k3sdemo.model.PvcViewModel;
 import com.example.k3sdemo.model.StorageOverviewViewModel;
 import com.example.k3sdemo.model.VolumeViewModel;
 import io.fabric8.kubernetes.api.model.Node;
 import io.fabric8.kubernetes.api.model.PersistentVolume;
+import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -32,6 +34,7 @@ public class StoreController {
 
             // 1. Fetch Resources
             List<PersistentVolume> pvs = client.persistentVolumes().list().getItems();
+            List<PersistentVolumeClaim> pvcList = client.persistentVolumeClaims().inAnyNamespace().list().getItems();
 
             List<Node> nodes = client.nodes().list().getItems();
             List<Pod> pods = client.pods().inAnyNamespace().list().getItems();
@@ -121,8 +124,46 @@ public class StoreController {
                     nodes.size(),
                     nodes.size());
 
+            // 5. Build PvcViewModels
+            List<PvcViewModel> pvcs = new ArrayList<>();
+            for (PersistentVolumeClaim pvc : pvcList) {
+                String pvcName = pvc.getMetadata().getName();
+                String pvcNs = pvc.getMetadata().getNamespace();
+                String pvcStatus = pvc.getStatus().getPhase();
+                String pvcCapacity = "-";
+                if (pvc.getStatus().getCapacity() != null && pvc.getStatus().getCapacity().containsKey("storage")) {
+                    pvcCapacity = pvc.getStatus().getCapacity().get("storage").getAmount() +
+                            pvc.getStatus().getCapacity().get("storage").getFormat();
+                } else if (pvc.getSpec().getResources().getRequests() != null &&
+                        pvc.getSpec().getResources().getRequests().containsKey("storage")) {
+                    pvcCapacity = pvc.getSpec().getResources().getRequests().get("storage").getAmount() +
+                            pvc.getSpec().getResources().getRequests().get("storage").getFormat();
+                }
+                String pvcAccessMode = pvc.getSpec().getAccessModes().isEmpty() ? "-"
+                        : pvc.getSpec().getAccessModes().get(0);
+                String storageClass = pvc.getSpec().getStorageClassName() != null
+                        ? pvc.getSpec().getStorageClassName()
+                        : "-";
+                String boundPv = pvc.getSpec().getVolumeName() != null
+                        ? pvc.getSpec().getVolumeName()
+                        : "未绑定";
+
+                String pvcStatusColor = "bg-gray-100 text-gray-800";
+                if ("Bound".equals(pvcStatus)) {
+                    pvcStatusColor = "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400";
+                } else if ("Pending".equals(pvcStatus)) {
+                    pvcStatusColor = "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400";
+                } else if ("Lost".equals(pvcStatus)) {
+                    pvcStatusColor = "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400";
+                }
+
+                pvcs.add(new PvcViewModel(pvcName, pvcNs, pvcStatus, pvcCapacity,
+                        pvcAccessMode, storageClass, boundPv, pvcStatusColor));
+            }
+
             model.addAttribute("overview", overview);
             model.addAttribute("volumes", volumes);
+            model.addAttribute("pvcs", pvcs);
             model.addAttribute("nodes", nodeDisks);
 
         } catch (Exception e) {
@@ -195,7 +236,7 @@ public class StoreController {
                     return (long) (number * 1024L * 1024 * 1024 * 1024 * 1024);
                 case "Ei":
                     return (long) (number * 1024L * 1024 * 1024 * 1024 * 1024 * 1024);
-                
+
                 // Decimal units (1000-based)
                 case "K":
                 case "k":
@@ -210,7 +251,7 @@ public class StoreController {
                     return (long) (number * 1000L * 1000 * 1000 * 1000 * 1000);
                 case "E":
                     return (long) (number * 1000L * 1000 * 1000 * 1000 * 1000 * 1000);
-                
+
                 // No unit or unknown, assume bytes
                 default:
                     return (long) number;

@@ -57,7 +57,7 @@ public class DevOpsService {
     @Value("${git.proxy:}")
     private String globalGitProxy;
 
-    @Value("${local.registry:localhost:5000}")
+    @Value("${local.registry:${harbor.host:harbor.local}}")
     private String localRegistry;
 
     private final Map<String, PipelineRun> pipelineRuns = new ConcurrentHashMap<>();
@@ -716,13 +716,16 @@ public class DevOpsService {
             cloneUrl = config.getGitUrl();
         }
 
-        // 构建 clone 命令: 代理 + 超时 + 阿里云 Alpine 源
+        // 构建 clone 命令: 代理 + 超时 + 阿里云 Alpine 源 (缓解 "remote end hung up")
         StringBuilder cloneCmdBuilder = new StringBuilder();
         cloneCmdBuilder.append("sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && ");
         cloneCmdBuilder.append("apk add --no-cache git && ");
         cloneCmdBuilder.append("git config --global http.version HTTP/1.1 && ");
+        cloneCmdBuilder.append("git config --global protocol.version 1 && ");
+        cloneCmdBuilder.append("git config --global http.postBuffer 524288000 && ");
         cloneCmdBuilder.append("git config --global http.lowSpeedLimit 1000 && ");
-        cloneCmdBuilder.append("git config --global http.lowSpeedTime 30 && ");
+        cloneCmdBuilder.append("git config --global http.lowSpeedTime 120 && ");
+        cloneCmdBuilder.append("git config --global core.compression 0 && ");
         if (config.hasGitProxy()) {
             cloneCmdBuilder.append("git config --global http.proxy ").append(config.getGitProxy()).append(" && ");
             cloneCmdBuilder.append("git config --global https.proxy ").append(config.getGitProxy()).append(" && ");
@@ -776,7 +779,7 @@ public class DevOpsService {
         // Init container 2: 智能 Dockerfile 处理 (多阶段构建)
         // 统一生成多阶段 Dockerfile:
         // 阶段1 (builder): Maven 打包 — 基于 maven:3.9-eclipse-temurin-17
-        // 阶段2 (runtime): 仅 COPY jar 运行 — 基于 eclipse-temurin:17-jdk-jammy
+        // 阶段2 (runtime): 仅 COPY jar 运行 — 基于 eclipse-temurin:17-jre-jammy
         // 这样 maven-build init container 不再需要, Kaniko 一步完成打包+构建
         String dockerfilePath = config.getDockerfilePath();
         String dfFile = dockerfilePath.startsWith("./") ? dockerfilePath.substring(2) : dockerfilePath;
@@ -824,7 +827,7 @@ public class DevOpsService {
                         "COPY . .\\n" +
                         "RUN mkdir -p /root/.m2 && echo '\\''%%s'\\'' > /root/.m2/settings.xml && %%s\\n" +
                         "\\n" +
-                        "FROM %%s/library/eclipse-temurin:17-jdk-jammy\\n" +
+                        "FROM %%s/library/eclipse-temurin:17-jre-jammy\\n" +
                         "WORKDIR /app\\n" +
                         "COPY --from=builder /build/target/*.jar app.jar\\n" +
                         "EXPOSE 8080\\n" +
@@ -860,7 +863,7 @@ public class DevOpsService {
                         "--destination=" + fullImage,
                         "--insecure",
                         "--skip-tls-verify",
-                        "--cache=false",
+                        "--cache=true",
                         "--oci-layout-path=")
                 .addNewVolumeMount()
                 .withName("workspace")

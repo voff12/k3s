@@ -5,6 +5,7 @@ import com.example.k3sdemo.model.ReleaseRecord;
 import io.fabric8.kubernetes.api.model.*;
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.apps.DeploymentBuilder;
 import io.fabric8.kubernetes.api.model.batch.v1.Job;
 import io.fabric8.kubernetes.api.model.batch.v1.JobBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -113,6 +114,18 @@ public class ReleaseService {
         String fullImage = config.getFullHarborImageRef(harborHost);
         String jobName = "release-" + record.getId();
 
+        // 如果没有指定 Deployment 名称，自动使用镜像名称（符合 K8s 命名规范）
+        if (config.getDeploymentName() == null || config.getDeploymentName().isEmpty()) {
+            String autoDeployName = config.getImageName()
+                    .toLowerCase()
+                    .replaceAll("[^a-z0-9-]", "-")
+                    .replaceAll("-+", "-")
+                    .replaceAll("^-|-$", "");
+            config.setDeploymentName(autoDeployName);
+            record.addLog("[INFO] 未指定 Deployment 名称，自动使用镜像名称: " + autoDeployName);
+            broadcastLog(record);
+        }
+
         try (KubernetesClient client = new KubernetesClientBuilder().build()) {
 
             // ========== Step 1: 构建发布 (Clone + Maven + Kaniko → Harbor) ==========
@@ -186,19 +199,15 @@ public class ReleaseService {
 
             boolean jobSuccess = waitForJobCompletion(client, jobName, record);
 
-            if (config.getDeploymentName() != null && !config.getDeploymentName().isEmpty()) {
-                if (jobSuccess) {
-                    // Also do server-side deployment update as a fallback
-                    deployToK3s(client, config, fullImage, record);
-                } else {
-                    diagnoseMainContainerFailure(client, jobName, record);
-                    record.fail("部署容器执行失败");
-                    broadcastStatus(record);
-                    return;
-                }
+            // 现在 Deployment 名称总是会被设置（自动或手动）
+            if (jobSuccess) {
+                // Also do server-side deployment update as a fallback
+                deployToK3s(client, config, fullImage, record);
             } else {
-                record.addLog("[INFO] 未指定 Deployment, 跳过 K3s 部署 (仅构建推送镜像)");
-                broadcastLog(record);
+                diagnoseMainContainerFailure(client, jobName, record);
+                record.fail("部署容器执行失败");
+                broadcastStatus(record);
+                return;
             }
 
             // ========== Done ==========
@@ -240,41 +249,50 @@ public class ReleaseService {
 
         // Kaniko 参数现在直接通过 withArgs 传递, 不再需要构建命令字符串
 
-        // Deployer 命令: 使用 kubectl 更新 Deployment
-        String deployCmd;
-        if (config.getDeploymentName() != null && !config.getDeploymentName().isEmpty()) {
-            deployCmd = String.format(
-                    "echo '[INFO] 开始部署到 K3s...' && " +
-                            "kubectl set image deployment/%s %s=%s -n %s && " +
-                            "echo '[INFO] ✓ Deployment 镜像已更新' && " +
-                            "kubectl rollout status deployment/%s -n %s --timeout=120s && " +
-                            "echo '[INFO] ✓ 滚动更新完成'",
-                    config.getDeploymentName(), config.getDeploymentName(), fullImage, config.getNamespace(),
-                    config.getDeploymentName(), config.getNamespace());
-        } else {
-            deployCmd = "echo '[INFO] 未指定 Deployment, 跳过部署' && exit 0";
-        }
+        // Deployer 命令: 使用 kubectl 更新或创建 Deployment
+        // 注意：动态获取容器名，兼容 hello / hello-container 等不同命名
+        String deployName = config.getDeploymentName();
+        String ns = config.getNamespace();
+        String deployCmd = String.format(
+                "echo '[INFO] 开始部署到 K3s (Deployment: %s)...' && " +
+                        "if kubectl get deployment %s -n %s >/dev/null 2>&1; then " +
+                        "  echo '[INFO] Deployment 已存在，更新镜像...' && " +
+                        "  CONTAINER=$(kubectl get deployment %s -n %s -o jsonpath='{.spec.template.spec.containers[0].name}') && " +
+                        "  kubectl set image deployment/%s $CONTAINER=%s -n %s && " +
+                        "  echo '[INFO] ✓ Deployment 镜像已更新' && " +
+                        "  kubectl rollout status deployment/%s -n %s --timeout=120s && " +
+                        "  echo '[INFO] ✓ 滚动更新完成'; " +
+                        "else " +
+                        "  echo '[INFO] Deployment 不存在，将由服务端自动创建'; " +
+                        "fi",
+                deployName, deployName, ns,
+                deployName, ns, deployName, fullImage, ns,
+                deployName, ns);
 
         // 构建 Harbor docker config for Kaniko authentication
+        // Kaniko 需要 base64 编码的 auth 字段: base64(username:password)
+        String authString = harborUsername + ":" + harborPassword;
+        String authBase64 = Base64.getEncoder().encodeToString(authString.getBytes());
         String dockerConfigJson = String.format(
-                "{\"auths\":{\"%s\":{\"username\":\"%s\",\"password\":\"%s\"}}}",
-                harborHost, harborUsername, harborPassword);
+                "{\"auths\":{\"%s\":{\"auth\":\"%s\"}}}",
+                harborHost, authBase64);
         // 基础镜像 (通过 Harbor 代理缓存,避免 Docker Hub 超时)
         String baseImage = (releaseBaseImage != null && !releaseBaseImage.isEmpty())
                 ? releaseBaseImage
-                : harborHost + "/library/eclipse-temurin:17-jdk-jar";
+                : harborHost + "/library/eclipse-temurin:17-jre-jammy";
 
         // Build 容器命令: Clone → Maven → Dockerfile.release → Docker Config
         StringBuilder buildCmdBuilder = new StringBuilder();
         // 安装 git
         buildCmdBuilder.append("apt-get update -qq && apt-get install -y -qq git > /dev/null 2>&1 && ");
         buildCmdBuilder.append("echo '[INFO] Git 已安装' && ");
-        // Git 配置
+        // Git 配置 (缓解 "remote end hung up" 超时/断连)
         buildCmdBuilder.append("git config --global http.version HTTP/1.1 && ");
         buildCmdBuilder.append("git config --global protocol.version 1 && ");
         buildCmdBuilder.append("git config --global http.postBuffer 524288000 && ");
         buildCmdBuilder.append("git config --global http.lowSpeedLimit 1000 && ");
-        buildCmdBuilder.append("git config --global http.lowSpeedTime 30 && ");
+        buildCmdBuilder.append("git config --global http.lowSpeedTime 120 && ");
+        buildCmdBuilder.append("git config --global core.compression 0 && ");
         if (globalGitProxy != null && !globalGitProxy.isEmpty()) {
             buildCmdBuilder.append("git config --global http.proxy ").append(globalGitProxy).append(" && ");
             buildCmdBuilder.append("git config --global https.proxy ").append(globalGitProxy).append(" && ");
@@ -295,9 +313,10 @@ public class ReleaseService {
                         + "> /workspace/Dockerfile.release && ",
                 baseImage));
         buildCmdBuilder.append("echo '[INFO] ✓ Dockerfile.release 已生成 (base: ").append(baseImage).append(")' && ");
-        // 写入 Harbor Docker Config
+        // 写入 Harbor Docker Config (使用 base64 编码避免 shell 转义问题)
+        String dockerConfigBase64 = Base64.getEncoder().encodeToString(dockerConfigJson.getBytes());
         buildCmdBuilder.append("mkdir -p /docker-config && ");
-        buildCmdBuilder.append("echo '").append(dockerConfigJson).append("' > /docker-config/config.json && ");
+        buildCmdBuilder.append("echo '").append(dockerConfigBase64).append("' | base64 -d > /docker-config/config.json && ");
         buildCmdBuilder.append("echo '[INFO] ✓ Harbor 认证已写入'");
 
         return new JobBuilder()
@@ -316,7 +335,7 @@ public class ReleaseService {
                 // Harbor 域名解析 (hostAliases → /etc/hosts)
                 .addNewHostAlias()
                 .withIp(harborIp != null && !harborIp.isEmpty() ? harborIp : "127.0.0.1")
-                .withHostnames(harborHost)
+                .withHostnames(harborHost.contains(":") ? harborHost.split(":")[0] : harborHost)
                 .endHostAlias()
 
                 // ===== Init Container 1: Build (Clone + Maven + Dockerfile + Docker Config)
@@ -353,7 +372,8 @@ public class ReleaseService {
                         "--destination=" + fullImage,
                         "--insecure",
                         "--skip-tls-verify",
-                        "--cache=false",
+                        "--cache=true",
+                        "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
                         "--verbosity=info")
                 .addNewVolumeMount()
                 .withName("workspace")
@@ -690,23 +710,115 @@ public class ReleaseService {
         return false;
     }
 
+    /**
+     * 确保 Harbor 镜像拉取 Secret 存在，如果不存在则创建。
+     */
+    private void ensureHarborSecret(KubernetesClient client, String namespace, ReleaseRecord record) {
+        String secretName = "harbor-registry-secret";
+        try {
+            Secret secret = client.secrets().inNamespace(namespace).withName(secretName).get();
+            if (secret == null) {
+                // 创建 Harbor Docker Registry Secret
+                String authString = harborUsername + ":" + harborPassword;
+                String authBase64 = Base64.getEncoder().encodeToString(authString.getBytes());
+                String dockerConfigJson = String.format(
+                        "{\"auths\":{\"%s\":{\"auth\":\"%s\"}}}",
+                        harborHost, authBase64);
+                String dockerConfigBase64 = Base64.getEncoder().encodeToString(dockerConfigJson.getBytes());
+
+                secret = new SecretBuilder()
+                        .withNewMetadata()
+                        .withName(secretName)
+                        .withNamespace(namespace)
+                        .endMetadata()
+                        .withType("kubernetes.io/dockerconfigjson")
+                        .addToData(".dockerconfigjson", dockerConfigBase64)
+                        .build();
+
+                client.secrets().inNamespace(namespace).resource(secret).create();
+                record.addLog("[INFO] ✓ Harbor Secret 已创建: " + secretName);
+                broadcastLog(record);
+            }
+        } catch (Exception e) {
+            record.addLog("[WARN] Harbor Secret 创建/检查失败: " + e.getMessage());
+            broadcastLog(record);
+        }
+    }
+
     private void deployToK3s(KubernetesClient client, ReleaseConfig config, String fullImage, ReleaseRecord record) {
         try {
             String ns = config.getNamespace();
             String deployName = config.getDeploymentName();
 
+            // 确保 Harbor Secret 存在
+            ensureHarborSecret(client, ns, record);
+
             Deployment deployment = client.apps().deployments()
                     .inNamespace(ns).withName(deployName).get();
 
             if (deployment == null) {
-                record.addLog("[WARN] Deployment 不存在: " + deployName + ", 将自动创建...");
+                record.addLog("[INFO] Deployment 不存在: " + deployName + ", 正在自动创建...");
+                broadcastLog(record);
+                
+                // 自动创建基本的 Deployment（包含 Harbor imagePullSecrets）
+                DeploymentBuilder deploymentBuilder = new DeploymentBuilder()
+                        .withNewMetadata()
+                        .withName(deployName)
+                        .withNamespace(ns)
+                        .addToLabels("app", deployName)
+                        .endMetadata()
+                        .withNewSpec()
+                        .withReplicas(1)
+                        .withNewSelector()
+                        .addToMatchLabels("app", deployName)
+                        .endSelector()
+                        .withNewTemplate()
+                        .withNewMetadata()
+                        .addToLabels("app", deployName)
+                        .endMetadata()
+                        .withNewSpec()
+                        .addNewImagePullSecret("harbor-registry-secret")
+                        .addNewContainer()
+                        .withName(deployName + "-container")
+                        .withImage(fullImage)
+                        .withImagePullPolicy("Always")
+                        .addNewPort()
+                        .withContainerPort(8080)
+                        .withName("http")
+                        .withProtocol("TCP")
+                        .endPort()
+                        .withNewResources()
+                        .addToRequests("cpu", new Quantity("100m"))
+                        .addToRequests("memory", new Quantity("256Mi"))
+                        .addToLimits("cpu", new Quantity("500m"))
+                        .addToLimits("memory", new Quantity("512Mi"))
+                        .endResources()
+                        .endContainer()
+                        .endSpec()
+                        .endTemplate()
+                        .endSpec();
+                
+                deployment = deploymentBuilder.build();
+                client.apps().deployments().inNamespace(ns).resource(deployment).create();
+                record.addLog("[INFO] ✓ Deployment 已创建: " + deployName + " (镜像: " + fullImage + ")");
                 broadcastLog(record);
                 return;
             }
 
-            var container = deployment.getSpec().getTemplate().getSpec().getContainers().get(0);
+            // 更新现有 Deployment
+            var podSpec = deployment.getSpec().getTemplate().getSpec();
+            var container = podSpec.getContainers().get(0);
             container.setImage(fullImage);
             container.setImagePullPolicy("Always");
+            
+            // 确保 imagePullSecrets 存在
+            if (podSpec.getImagePullSecrets() == null || podSpec.getImagePullSecrets().isEmpty()) {
+                LocalObjectReference imagePullSecret = new LocalObjectReference();
+                imagePullSecret.setName("harbor-registry-secret");
+                podSpec.setImagePullSecrets(Collections.singletonList(imagePullSecret));
+                record.addLog("[INFO] 已添加 Harbor imagePullSecrets 到现有 Deployment");
+                broadcastLog(record);
+            }
 
             client.apps().deployments().inNamespace(ns).resource(deployment).update();
             record.addLog("[INFO] ✓ Deployment 已更新: " + deployName + " → " + fullImage);
@@ -776,35 +888,113 @@ public class ReleaseService {
         try {
             List<Pod> pods = client.pods().inNamespace("default")
                     .withLabel("job-name", jobName).list().getItems();
-            if (pods.isEmpty())
+            if (pods.isEmpty()) {
+                record.addLog("[WARN] 未找到 Pod，无法进行诊断");
+                broadcastLog(record);
                 return;
+            }
             Pod pod = pods.get(0);
             String podName = pod.getMetadata().getName();
+            String podPhase = pod.getStatus() != null ? pod.getStatus().getPhase() : "Unknown";
 
             record.addLog("=== 错误诊断 (" + podName + ") ===");
+            record.addLog("[INFO] Pod 状态: " + podPhase);
+            broadcastLog(record);
 
+            // 检查 Init Containers
             var initStatuses = pod.getStatus().getInitContainerStatuses();
-            if (initStatuses != null) {
+            if (initStatuses != null && !initStatuses.isEmpty()) {
+                record.addLog("[INFO] 检查 Init Containers...");
+                broadcastLog(record);
                 for (var cs : initStatuses) {
                     if (cs.getState() != null && cs.getState().getTerminated() != null) {
                         int exitCode = cs.getState().getTerminated().getExitCode();
                         if (exitCode != 0) {
-                            record.addLog("❌ [" + cs.getName() + "] exit=" + exitCode + ": " +
+                            record.addLog("❌ [Init Container: " + cs.getName() + "] exit=" + exitCode + ": " +
                                     diagnoseExitCode(exitCode, cs.getState().getTerminated().getReason()));
                             try {
                                 String logs = client.pods().inNamespace("default").withName(podName)
-                                        .inContainer(cs.getName()).tailingLines(10).getLog();
-                                if (logs != null)
-                                    record.addLog("日志: " + logs);
-                            } catch (Exception ignored) {
+                                        .inContainer(cs.getName()).tailingLines(20).getLog();
+                                if (logs != null && !logs.trim().isEmpty()) {
+                                    record.addLog("最后20行日志:");
+                                    String[] logLines = logs.split("\n");
+                                    for (String line : logLines) {
+                                        record.addLog("  " + line);
+                                    }
+                                }
+                            } catch (Exception e) {
+                                record.addLog("[WARN] 无法获取 " + cs.getName() + " 日志: " + e.getMessage());
                             }
+                        } else {
+                            record.addLog("✓ [Init Container: " + cs.getName() + "] 执行成功");
                         }
+                    } else if (cs.getState() != null && cs.getState().getWaiting() != null) {
+                        String reason = cs.getState().getWaiting().getReason();
+                        record.addLog("⏳ [Init Container: " + cs.getName() + "] 等待中: " + reason);
                     }
                 }
             }
+
+            // 检查主容器（deployer）
+            var containerStatuses = pod.getStatus().getContainerStatuses();
+            if (containerStatuses != null && !containerStatuses.isEmpty()) {
+                record.addLog("[INFO] 检查主容器...");
+                broadcastLog(record);
+                for (var cs : containerStatuses) {
+                    if (cs.getState() != null && cs.getState().getTerminated() != null) {
+                        int exitCode = cs.getState().getTerminated().getExitCode();
+                        String reason = cs.getState().getTerminated().getReason();
+                        record.addLog("❌ [主容器: " + cs.getName() + "] exit=" + exitCode + ": " +
+                                diagnoseExitCode(exitCode, reason));
+                        try {
+                            String logs = client.pods().inNamespace("default").withName(podName)
+                                    .inContainer(cs.getName()).tailingLines(50).getLog();
+                            if (logs != null && !logs.trim().isEmpty()) {
+                                record.addLog("最后50行日志:");
+                                String[] logLines = logs.split("\n");
+                                for (String line : logLines) {
+                                    record.addLog("  " + line);
+                                }
+                            }
+                        } catch (Exception e) {
+                            record.addLog("[WARN] 无法获取 " + cs.getName() + " 日志: " + e.getMessage());
+                        }
+                    } else if (cs.getState() != null && cs.getState().getWaiting() != null) {
+                        String reason = cs.getState().getWaiting().getReason();
+                        String message = cs.getState().getWaiting().getMessage();
+                        record.addLog("⏳ [主容器: " + cs.getName() + "] 等待中: " + reason +
+                                (message != null ? " (" + message + ")" : ""));
+                    } else if (cs.getState() != null && cs.getState().getRunning() != null) {
+                        record.addLog("✓ [主容器: " + cs.getName() + "] 运行中");
+                    }
+                }
+            }
+
+            // 检查 Pod 事件（如果有）
+            try {
+                record.addLog("[INFO] 检查 Pod 事件...");
+                broadcastLog(record);
+                var events = client.v1().events().inNamespace("default")
+                        .withField("involvedObject.name", podName)
+                        .withField("involvedObject.kind", "Pod")
+                        .list().getItems();
+                if (!events.isEmpty()) {
+                    // 只显示最近的错误事件
+                    events.stream()
+                            .filter(e -> "Warning".equals(e.getType()))
+                            .sorted((a, b) -> b.getFirstTimestamp().compareTo(a.getFirstTimestamp()))
+                            .limit(5)
+                            .forEach(e -> record.addLog("⚠️  事件: " + e.getReason() + " - " + e.getMessage()));
+                }
+            } catch (Exception e) {
+                // 忽略事件获取失败
+            }
+
+            record.addLog("=== 诊断完成 ===");
             broadcastLog(record);
         } catch (Exception e) {
             record.addLog("[ERROR] 诊断失败: " + e.getMessage());
+            e.printStackTrace();
             broadcastLog(record);
         }
     }
