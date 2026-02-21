@@ -56,6 +56,14 @@ rules:
   - apiGroups: ["apps"]
     resources: ["replicasets"]
     verbs: ["get", "list", "watch"]
+  # Secrets - Required for harbor-registry-secret (imagePullSecrets)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  # Services - Required for exposing Deployment (NodePort)
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 ---
 # ClusterRoleBinding - Binds the default service account to the ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1

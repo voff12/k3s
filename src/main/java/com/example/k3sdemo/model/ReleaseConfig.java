@@ -13,6 +13,7 @@ public class ReleaseConfig {
     private String deploymentName;
     private String dockerfilePath = "./Dockerfile";
     private String gitToken;
+    private String gitProxy;  // HTTP 代理，如 http://10.0.0.1:7890，用于访问 GitHub
     private String buildCommand = "mvn clean package -DskipTests";
     private String harborProject = "library";
 
@@ -85,6 +86,14 @@ public class ReleaseConfig {
         this.gitToken = gitToken;
     }
 
+    public String getGitProxy() {
+        return gitProxy;
+    }
+
+    public void setGitProxy(String gitProxy) {
+        this.gitProxy = gitProxy;
+    }
+
     public String getBuildCommand() {
         return buildCommand;
     }
@@ -105,6 +114,10 @@ public class ReleaseConfig {
 
     public boolean hasGitAuth() {
         return gitToken != null && !gitToken.isEmpty();
+    }
+
+    public boolean hasGitProxy() {
+        return gitProxy != null && !gitProxy.isEmpty();
     }
 
     public boolean hasBuildStep() {

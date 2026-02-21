@@ -1,0 +1,22 @@
+# K3s 私有镜像仓库配置
+# 解决: "http: server gave HTTP response to HTTPS client"
+# Harbor 使用 HTTP 时，containerd 默认用 HTTPS，需显式配置 HTTP endpoint
+#
+# 部署步骤:
+#   1. 若节点无法解析 harbor.local，将 mirrors 和 configs 的 key 改为 IP:30002（如 60.205.252.82:30002）
+#      同时 application.properties 的 harbor.host 也需改为 IP:30002
+#   2. 修改 auth 中的 username/password 与 application.properties 一致
+#   3. sudo cp k3s-registries.yaml /etc/rancher/k3s/registries.yaml
+#   4. sudo systemctl restart k3s   # 或 k3s-agent（若为 agent 节点）
+
+mirrors:
+  harbor.local:30002:
+    endpoint:
+      - "http://harbor.local:30002"   # 若 DNS 不可用，改为 "http://60.205.252.82:30002"
+configs:
+  harbor.local:30002:   # key 必须与镜像地址中的 registry 一致
+    auth:
+      username: admin
+      password: Wx123456
+    tls:
+      insecure_skip_verify: true

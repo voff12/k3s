@@ -513,15 +513,23 @@
                             class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
                     </div>
                 </div>
-                <!-- Git Token -->
-                <div>
-                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Git Token
-                        <span class="text-slate-400 font-normal normal-case">(私有仓库)</span></label>
-                    <div class="relative">
-                        <span
-                            class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">key</span>
-                        <input type="password" id="formGitToken" placeholder="留空则使用全局配置或公开访问"
-                            class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                <!-- Git Token + Git 代理 -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Git Token
+                            <span class="text-slate-400 font-normal normal-case">(私有仓库)</span></label>
+                        <div class="relative">
+                            <span
+                                class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">key</span>
+                            <input type="password" id="formGitToken" placeholder="留空则使用全局配置或公开访问"
+                                class="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Git 代理
+                            <span class="text-slate-400 font-normal normal-case">(无法直连 GitHub 时)</span></label>
+                        <input type="text" id="formGitProxy" placeholder="例: http://10.0.0.1:7890，留空则用 application.properties"
+                            class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary font-mono" />
                     </div>
                 </div>
                 <!-- Hint -->
@@ -582,6 +590,7 @@
                 deploymentName: document.getElementById('formDeployment').value.trim(),
                 dockerfilePath: document.getElementById('formDockerfile').value.trim() || './Dockerfile',
                 gitToken: document.getElementById('formGitToken').value.trim(),
+                gitProxy: document.getElementById('formGitProxy').value.trim(),
                 buildCommand: document.getElementById('formBuildCommand').value.trim(),
                 harborProject: document.getElementById('formHarborProject').value.trim() || 'library'
             };
@@ -648,7 +657,15 @@
 
             es.addEventListener('log', function (e) {
                 const data = JSON.parse(e.data);
-                appendLogLine(data.line);
+                if (data.full && data.logs && data.logs.length > 0) {
+                    const consoleEl = document.getElementById('consoleOutput');
+                    const placeholder = consoleEl.querySelector('.italic');
+                    if (placeholder) placeholder.remove();
+                    consoleEl.innerHTML = '';
+                    data.logs.forEach(line => appendLogLine(line));
+                } else if (data.line) {
+                    appendLogLine(data.line);
+                }
             });
 
             es.addEventListener('status', function (e) {

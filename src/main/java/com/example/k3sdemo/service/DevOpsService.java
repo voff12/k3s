@@ -864,7 +864,19 @@ public class DevOpsService {
                         "--insecure",
                         "--skip-tls-verify",
                         "--cache=true",
+                        "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
+                        "--snapshot-mode=redo",
                         "--oci-layout-path=")
+                .addNewVolumeMount()
+                .withName("docker-config")
+                .withMountPath("/kaniko/.docker")
+                .endVolumeMount()
+                .withNewResources()
+                .addToRequests("cpu", new Quantity("500m"))
+                .addToRequests("memory", new Quantity("1Gi"))
+                .addToLimits("cpu", new Quantity("2"))
+                .addToLimits("memory", new Quantity("4Gi"))
+                .endResources()
                 .addNewVolumeMount()
                 .withName("workspace")
                 .withMountPath("/workspace")

@@ -545,9 +545,17 @@ java -jar k3s-1.0.0-SNAPSHOT.jar
 
 **问题**：Deployment 创建后，Pod 出现 `ImagePullBackOff` 错误，无法从 Harbor 拉取镜像。
 
-**解决方案**：
+**常见错误**：`http: server gave HTTP response to HTTPS client`
 
-系统已自动处理此问题：
+- **原因**：Harbor 使用 HTTP，但 K3s containerd 默认用 HTTPS 访问
+- **解决**：配置 K3s 使用 HTTP 访问 Harbor，复制 `k3s-registries.yaml` 到节点并重启：
+  ```bash
+  sudo cp k3s-registries.yaml /etc/rancher/k3s/registries.yaml
+  sudo systemctl restart k3s
+  ```
+  修改其中的 Harbor 地址、用户名、密码与 `application.properties` 一致。
+
+**其他解决方案**：
 
 1. **自动创建 Harbor Secret**：
    - 系统会在创建 Deployment 时自动创建 `harbor-registry-secret`
@@ -598,12 +606,15 @@ java -jar k3s-1.0.0-SNAPSHOT.jar
 
 ### Git 克隆失败
 
-**问题**：发布时 Git 克隆失败。
+**问题**：发布时 Git 克隆失败，如 `Failed to connect to github.com port 443`。
 
 **解决方案**：
 
-1. **私有仓库**：填写 `gitToken` 字段（GitLab/GitHub Personal Access Token）
-2. **网络问题**：配置 `git.proxy` 设置 HTTP 代理
+1. **无法直连 GitHub**：配置 Git 代理
+   - 在发布表单填写 **Git 代理**（如 `http://192.168.1.100:7890`）
+   - 或在 `application.properties` 设置 `git.proxy=http://代理IP:端口`
+   - 代理地址需能被 K3s Pod 访问（使用宿主机/节点 IP，不要用 127.0.0.1）
+2. **私有仓库**：填写 `gitToken` 字段（GitLab/GitHub Personal Access Token）
 3. **分支不存在**：确认指定的分支名称正确
 
 ### Kaniko 构建超时

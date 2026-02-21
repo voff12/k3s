@@ -102,6 +102,9 @@ public class ReleaseService {
         if (config.hasGitAuth()) {
             record.addLog("[INFO] Git 认证: 使用 Private Token");
         }
+        if (config.hasGitProxy() || (globalGitProxy != null && !globalGitProxy.isEmpty())) {
+            record.addLog("[INFO] Git 代理: " + (config.hasGitProxy() ? config.getGitProxy() : globalGitProxy));
+        }
 
         executor.submit(() -> executeRelease(record));
         return record;
@@ -215,10 +218,13 @@ public class ReleaseService {
             record.addLog("[INFO] ✓ 应用发布完成! 总耗时: " + record.getDuration());
             broadcastStatus(record);
             broadcastLog(record);
+            // 确保前端收到最终状态后再发送 complete
+            Thread.sleep(200);
 
         } catch (Exception e) {
             record.fail("发布异常: " + e.getMessage());
             broadcastStatus(record);
+            broadcastLog(record);
         } finally {
             completeEmitters(record.getId());
         }
@@ -293,9 +299,10 @@ public class ReleaseService {
         buildCmdBuilder.append("git config --global http.lowSpeedLimit 1000 && ");
         buildCmdBuilder.append("git config --global http.lowSpeedTime 120 && ");
         buildCmdBuilder.append("git config --global core.compression 0 && ");
-        if (globalGitProxy != null && !globalGitProxy.isEmpty()) {
-            buildCmdBuilder.append("git config --global http.proxy ").append(globalGitProxy).append(" && ");
-            buildCmdBuilder.append("git config --global https.proxy ").append(globalGitProxy).append(" && ");
+        String effectiveProxy = config.hasGitProxy() ? config.getGitProxy() : globalGitProxy;
+        if (effectiveProxy != null && !effectiveProxy.isEmpty()) {
+            buildCmdBuilder.append("git config --global http.proxy ").append(effectiveProxy).append(" && ");
+            buildCmdBuilder.append("git config --global https.proxy ").append(effectiveProxy).append(" && ");
         }
         // 克隆代码
         buildCmdBuilder.append("git clone --depth 1 --branch ").append(config.getBranch())
@@ -374,7 +381,14 @@ public class ReleaseService {
                         "--skip-tls-verify",
                         "--cache=true",
                         "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
+                        "--snapshot-mode=redo",
                         "--verbosity=info")
+                .withNewResources()
+                .addToRequests("cpu", new Quantity("500m"))
+                .addToRequests("memory", new Quantity("1Gi"))
+                .addToLimits("cpu", new Quantity("2"))
+                .addToLimits("memory", new Quantity("4Gi"))
+                .endResources()
                 .addNewVolumeMount()
                 .withName("workspace")
                 .withMountPath("/workspace")
@@ -711,6 +725,44 @@ public class ReleaseService {
     }
 
     /**
+     * 确保 Service 存在，用于暴露 Deployment 供访问（NodePort）。
+     */
+    private void ensureService(KubernetesClient client, String namespace, String deployName, ReleaseRecord record) {
+        String svcName = deployName;
+        try {
+            io.fabric8.kubernetes.api.model.Service existing = client.services().inNamespace(namespace).withName(svcName).get();
+            if (existing == null) {
+                io.fabric8.kubernetes.api.model.Service svc = new io.fabric8.kubernetes.api.model.ServiceBuilder()
+                        .withNewMetadata()
+                        .withName(svcName)
+                        .withNamespace(namespace)
+                        .addToLabels("app", deployName)
+                        .endMetadata()
+                        .withNewSpec()
+                        .withType("NodePort")
+                        .addToSelector("app", deployName)
+                        .addNewPort()
+                        .withName("http")
+                        .withProtocol("TCP")
+                        .withPort(8080)
+                        .withNewTargetPort(8080)
+                        .endPort()
+                        .endSpec()
+                        .build();
+                client.services().inNamespace(namespace).resource(svc).create();
+                io.fabric8.kubernetes.api.model.Service created = client.services().inNamespace(namespace).withName(svcName).get();
+                Integer nodePort = created != null && created.getSpec() != null && !created.getSpec().getPorts().isEmpty()
+                        ? created.getSpec().getPorts().get(0).getNodePort() : null;
+                record.addLog("[INFO] ✓ Service 已创建: " + svcName + " (NodePort: " + (nodePort != null ? nodePort : "自动分配") + ", 访问: http://节点IP:" + (nodePort != null ? nodePort : "NodePort") + ")");
+                broadcastLog(record);
+            }
+        } catch (Exception e) {
+            record.addLog("[WARN] Service 创建/检查失败: " + e.getMessage());
+            broadcastLog(record);
+        }
+    }
+
+    /**
      * 确保 Harbor 镜像拉取 Secret 存在，如果不存在则创建。
      */
     private void ensureHarborSecret(KubernetesClient client, String namespace, ReleaseRecord record) {
@@ -802,6 +854,7 @@ public class ReleaseService {
                 client.apps().deployments().inNamespace(ns).resource(deployment).create();
                 record.addLog("[INFO] ✓ Deployment 已创建: " + deployName + " (镜像: " + fullImage + ")");
                 broadcastLog(record);
+                ensureService(client, ns, deployName, record);
                 return;
             }
 
@@ -822,6 +875,8 @@ public class ReleaseService {
 
             client.apps().deployments().inNamespace(ns).resource(deployment).update();
             record.addLog("[INFO] ✓ Deployment 已更新: " + deployName + " → " + fullImage);
+
+            ensureService(client, ns, deployName, record);
 
             record.addLog("[INFO] 等待滚动更新...");
             broadcastLog(record);
@@ -1075,13 +1130,12 @@ public class ReleaseService {
         List<String> allLogs = record.getLogs();
         if (allLogs.isEmpty())
             return;
-        String lastLine = allLogs.get(allLogs.size() - 1);
 
         for (SseEmitter emitter : list) {
             try {
                 emitter.send(SseEmitter.event()
                         .name("log")
-                        .data(Map.of("line", lastLine, "index", allLogs.size() - 1)));
+                        .data(Map.of("logs", allLogs, "full", true)));
             } catch (Exception e) {
                 list.remove(emitter);
             }
