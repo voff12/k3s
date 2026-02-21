@@ -18,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -381,7 +382,6 @@ public class ReleaseService {
                         "--skip-tls-verify",
                         "--cache=true",
                         "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
-                        "--snapshot-mode=redo",
                         "--verbosity=info")
                 .withNewResources()
                 .addToRequests("cpu", new Quantity("500m"))
@@ -1058,7 +1058,7 @@ public class ReleaseService {
 
     @Scheduled(fixedRate = 60000)
     public void sweepStaleReleases() {
-        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30);
         for (Map.Entry<String, ReleaseRecord> entry : releases.entrySet()) {
             ReleaseRecord record = entry.getValue();
             if (!record.isFinished() && record.getLastActivityTime().isBefore(cutoff)) {

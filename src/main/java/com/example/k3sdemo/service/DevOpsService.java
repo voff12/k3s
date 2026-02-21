@@ -17,6 +17,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -865,7 +866,6 @@ public class DevOpsService {
                         "--skip-tls-verify",
                         "--cache=true",
                         "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
-                        "--snapshot-mode=redo",
                         "--oci-layout-path=")
                 .addNewVolumeMount()
                 .withName("docker-config")
@@ -1116,7 +1116,7 @@ public class DevOpsService {
      */
     @Scheduled(fixedRate = 60000)
     public void sweepStalePipelines() {
-        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(30);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30);
         for (Map.Entry<String, PipelineRun> entry : pipelineRuns.entrySet()) {
             PipelineRun run = entry.getValue();
             if (!run.isFinished() && run.getLastActivityTime().isBefore(cutoff)) {

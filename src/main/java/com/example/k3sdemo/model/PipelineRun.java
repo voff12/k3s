@@ -1,6 +1,7 @@
 package com.example.k3sdemo.model;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -42,12 +43,14 @@ public class PipelineRun {
     private volatile String errorMessage;
     private volatile LocalDateTime lastActivityTime;
 
+    private static final ZoneId BEIJING = ZoneId.of("Asia/Shanghai");
+
     public PipelineRun(PipelineConfig config) {
         this.id = UUID.randomUUID().toString().substring(0, 8);
         this.config = config;
         this.status = Status.PENDING;
         this.currentStep = -1;
-        this.startTime = LocalDateTime.now();
+        this.startTime = LocalDateTime.now(BEIJING);
         this.lastActivityTime = this.startTime;
         this.logs = Collections.synchronizedList(new ArrayList<>());
     }
@@ -55,9 +58,9 @@ public class PipelineRun {
     // --- Log operations ---
 
     public void addLog(String line) {
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+        String timestamp = LocalDateTime.now(BEIJING).format(DateTimeFormatter.ofPattern("HH:mm:ss"));
         logs.add("[" + timestamp + "] " + line);
-        this.lastActivityTime = LocalDateTime.now();
+        this.lastActivityTime = LocalDateTime.now(BEIJING);
     }
 
     public List<String> getLogs() {
@@ -74,7 +77,7 @@ public class PipelineRun {
 
     public void advanceTo(Status newStatus) {
         this.status = newStatus;
-        this.lastActivityTime = LocalDateTime.now();
+        this.lastActivityTime = LocalDateTime.now(BEIJING);
         switch (newStatus) {
             case CLONING -> currentStep = 0;
             case BUILDING -> currentStep = 1;
@@ -82,7 +85,7 @@ public class PipelineRun {
             case DEPLOYING -> currentStep = 3;
             case SUCCESS, FAILED -> {
                 currentStep = 4;
-                endTime = LocalDateTime.now();
+                endTime = LocalDateTime.now(BEIJING);
             }
             default -> {
             }
@@ -92,7 +95,7 @@ public class PipelineRun {
     public void fail(String errorMessage) {
         this.errorMessage = errorMessage;
         this.status = Status.FAILED;
-        this.endTime = LocalDateTime.now();
+        this.endTime = LocalDateTime.now(BEIJING);
         addLog("[ERROR] " + errorMessage);
     }
 
@@ -135,7 +138,7 @@ public class PipelineRun {
     }
 
     public String getDuration() {
-        LocalDateTime end = endTime != null ? endTime : LocalDateTime.now();
+        LocalDateTime end = endTime != null ? endTime : LocalDateTime.now(BEIJING);
         long seconds = java.time.Duration.between(startTime, end).getSeconds();
         return String.format("%02d:%02d", seconds / 60, seconds % 60);
     }
