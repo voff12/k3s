@@ -16,7 +16,9 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Controller
 public class StoreController {
@@ -40,6 +42,21 @@ public class StoreController {
             List<Pod> pods = client.pods().inAnyNamespace().list().getItems();
 
             // 2. Build VolumeViewModels
+            // Pre-index pods by "namespace/claimName" to avoid O(n²) nested loop
+            Map<String, String> pvcToPodMap = new HashMap<>();
+            for (Pod pod : pods) {
+                if (pod.getSpec() != null && pod.getSpec().getVolumes() != null && pod.getMetadata() != null) {
+                    String podNamespace = pod.getMetadata().getNamespace();
+                    String podName = pod.getMetadata().getName();
+                    for (io.fabric8.kubernetes.api.model.Volume vol : pod.getSpec().getVolumes()) {
+                        if (vol.getPersistentVolumeClaim() != null) {
+                            String key = podNamespace + "/" + vol.getPersistentVolumeClaim().getClaimName();
+                            pvcToPodMap.putIfAbsent(key, podName);
+                        }
+                    }
+                }
+            }
+
             List<VolumeViewModel> volumes = new ArrayList<>();
             for (PersistentVolume pv : pvs) {
                 String name = pv.getMetadata().getName();
@@ -55,19 +72,9 @@ public class StoreController {
                 if (pv.getSpec().getClaimRef() != null) {
                     claimRef = pv.getSpec().getClaimRef().getName();
                     String claimNs = pv.getSpec().getClaimRef().getNamespace();
-
-                    String targetClaim = claimRef;
-                    // Find Pods using this PVC
-                    for (Pod pod : pods) {
-                        if (pod.getSpec().getVolumes() != null) {
-                            boolean isMounted = pod.getSpec().getVolumes().stream()
-                                    .anyMatch(v -> v.getPersistentVolumeClaim() != null &&
-                                            v.getPersistentVolumeClaim().getClaimName().equals(targetClaim));
-                            if (isMounted && pod.getMetadata().getNamespace().equals(claimNs)) {
-                                mountedPod = pod.getMetadata().getName();
-                                break; // Just show one for demo
-                            }
-                        }
+                    String podFromMap = pvcToPodMap.get(claimNs + "/" + claimRef);
+                    if (podFromMap != null) {
+                        mountedPod = podFromMap;
                     }
                 }
 

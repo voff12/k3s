@@ -51,6 +51,14 @@ public class MemoryController {
             long allocatedMemoryBytes = 0;
             List<NodeMemoryViewModel> nodeMemories = new ArrayList<>();
 
+            // Pre-group pods by node name to avoid O(n²) nested loop
+            Map<String, List<Pod>> podsByNode = new HashMap<>();
+            for (Pod pod : pods) {
+                if (pod.getSpec() != null && pod.getSpec().getNodeName() != null) {
+                    podsByNode.computeIfAbsent(pod.getSpec().getNodeName(), k -> new ArrayList<>()).add(pod);
+                }
+            }
+
             for (Node node : nodes) {
                 String nodeName = node.getMetadata().getName();
                 String memoryStr = "0";
@@ -65,8 +73,8 @@ public class MemoryController {
 
                 // 计算节点已分配内存（从 Pod 的 requests 累加）
                 long nodeAllocatedBytes = 0;
-                for (Pod pod : pods) {
-                    if (pod.getSpec() != null && nodeName.equals(pod.getSpec().getNodeName()) && pod.getSpec().getContainers() != null) {
+                for (Pod pod : podsByNode.getOrDefault(nodeName, List.of())) {
+                    if (pod.getSpec().getContainers() != null) {
                         for (io.fabric8.kubernetes.api.model.Container container : pod.getSpec().getContainers()) {
                             if (container.getResources() != null && container.getResources().getRequests() != null) {
                                 io.fabric8.kubernetes.api.model.Quantity memoryRequest = container.getResources().getRequests().get("memory");
@@ -170,6 +178,13 @@ public class MemoryController {
             
             // 1. 收集节点内存分布数据
             List<NodeMemoryViewModel> nodeMemories = new ArrayList<>();
+            // Pre-group pods by node name to avoid O(n²) nested loop
+            Map<String, List<Pod>> podsByNode = new HashMap<>();
+            for (Pod pod : pods) {
+                if (pod.getSpec() != null && pod.getSpec().getNodeName() != null) {
+                    podsByNode.computeIfAbsent(pod.getSpec().getNodeName(), k -> new ArrayList<>()).add(pod);
+                }
+            }
             for (Node node : nodes) {
                 String nodeName = node.getMetadata().getName();
                 String memoryStr = "0";
@@ -179,8 +194,8 @@ public class MemoryController {
                 long nodeMemoryBytes = parseQuantityToBytes(memoryStr);
                 
                 long nodeAllocatedBytes = 0;
-                for (Pod pod : pods) {
-                    if (nodeName.equals(pod.getSpec().getNodeName()) && pod.getSpec().getContainers() != null) {
+                for (Pod pod : podsByNode.getOrDefault(nodeName, List.of())) {
+                    if (pod.getSpec().getContainers() != null) {
                         for (io.fabric8.kubernetes.api.model.Container container : pod.getSpec().getContainers()) {
                             if (container.getResources() != null && container.getResources().getRequests() != null) {
                                 io.fabric8.kubernetes.api.model.Quantity memoryRequest = container.getResources().getRequests().get("memory");
@@ -549,37 +564,29 @@ public class MemoryController {
         
         // 按内存限制（Limit）排序，因为这是真实的配置值
         // 如果 Limit 是 "未设置"，则按 Request 排序；如果都是 "未设置"，则排到最后
-        podMemories.sort((a, b) -> {
-            long aBytes = 0;
-            long bBytes = 0;
-            
-            // 尝试解析 Limit，如果失败（"未设置"），尝试解析 Request
+        // Pre-compute sort keys to avoid repeated parseQuantityToBytes() calls inside the comparator
+        List<java.util.AbstractMap.SimpleEntry<Long, PodMemoryViewModel>> sortEntries = new ArrayList<>(podMemories.size());
+        for (PodMemoryViewModel p : podMemories) {
+            long bytes = 0;
             try {
-                if (!a.getMemoryLimit().equals("未设置") && !a.getMemoryLimit().equals("0")) {
-                    aBytes = parseQuantityToBytes(a.getMemoryLimit());
-                } else if (!a.getMemoryRequest().equals("未设置") && !a.getMemoryRequest().equals("0")) {
-                    aBytes = parseQuantityToBytes(a.getMemoryRequest());
+                if (!p.getMemoryLimit().equals("未设置") && !p.getMemoryLimit().equals("0")) {
+                    bytes = parseQuantityToBytes(p.getMemoryLimit());
+                } else if (!p.getMemoryRequest().equals("未设置") && !p.getMemoryRequest().equals("0")) {
+                    bytes = parseQuantityToBytes(p.getMemoryRequest());
                 }
             } catch (Exception e) {
-                // 解析失败，使用 0
-                aBytes = 0;
+                // 解析失败，使用 0；记录日志以便调试
+                System.err.println("getPodMemoryRanking - Failed to parse memory quantity for sort key, pod: " +
+                        p.getPodName() + ", limit: " + p.getMemoryLimit() + ", request: " + p.getMemoryRequest() +
+                        ", error: " + e.getMessage());
             }
-            
-            try {
-                if (!b.getMemoryLimit().equals("未设置") && !b.getMemoryLimit().equals("0")) {
-                    bBytes = parseQuantityToBytes(b.getMemoryLimit());
-                } else if (!b.getMemoryRequest().equals("未设置") && !b.getMemoryRequest().equals("0")) {
-                    bBytes = parseQuantityToBytes(b.getMemoryRequest());
-                }
-            } catch (Exception e) {
-                // 解析失败，使用 0
-                bBytes = 0;
-            }
-            
-            return Long.compare(bBytes, aBytes);
-        });
-        
-        return podMemories.stream().limit(20).collect(Collectors.toList());
+            sortEntries.add(new java.util.AbstractMap.SimpleEntry<>(bytes, p));
+        }
+        sortEntries.sort((a, b) -> Long.compare(b.getKey(), a.getKey()));
+        return sortEntries.stream()
+                .limit(20)
+                .map(java.util.AbstractMap.SimpleEntry::getValue)
+                .collect(Collectors.toList());
     }
 
     private List<Double> generateUtilizationHistory(double currentUtilization) {
