@@ -13,7 +13,7 @@
 | Pod 终端 | WebSocket 交互式终端 | 基于 xterm.js，支持多容器选择、ANSI 颜色 |
 | 部署管理 | 创建、扩缩容、更新 | 镜像更新、资源配置、环境变量修改 |
 | 内存管理 | 集群内存分析 | 节点/Pod 内存排行、AI 优化建议、一键调整 |
-| 存储管理 | PV/磁盘概览 | PersistentVolume 状态、节点磁盘用量 |
+| 存储管理 | PV/PVC与磁盘 | PersistentVolume状态、PVC绑定关系、节点磁盘用量 |
 | CI/CD 流水线 | 代码到部署全链路 | Git → Maven → Kaniko → K3s，实时日志流 |
 | 应用发布 | Git 到 Harbor 到 K3s | Git 克隆 → Maven 构建 → Kaniko 推送 Harbor → K3s 部署 |
 | AI 工具 | Kubernetes 智能问答 | 基于通义千问，流式响应，Markdown 渲染 |
@@ -358,7 +358,7 @@ sudo bash prewarm-images.sh
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/store` | 存储概览页面 |
+| GET | `/store` | 存储概览页面（含 PV 状态、PVC 绑定、节点磁盘） |
 
 ### CI/CD 流水线
 
