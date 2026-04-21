@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html class="light" lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>HA 智能诊断 - 灵犀平台</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap"
+        rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+        rel="stylesheet" />
+    <script src="https://unpkg.com/marked@4.3.0/marked.min.js"></script>
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2b9dee",
+                        "background-light": "#f6f7f8",
+                        "background-dark": "#101a22",
+                        "ha-green": "#10b981",
+                        "ha-red": "#ef4444",
+                        "ha-yellow": "#f59e0b",
+                        "ha-blue": "#3b82f6",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "system-ui", "-apple-system", "sans-serif"],
+                    }
+                },
+            },
+        }
+    </script>
+    <style type="text/tailwindcss">
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+            vertical-align: middle;
+        }
+        body { font-family: 'Inter', "Microsoft YaHei", sans-serif; }
+
+        .markdown-body { line-height: 1.6; color: inherit; }
+        .markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4 {
+            font-weight: 600; margin-top: 1.5em; margin-bottom: 0.75em; line-height: 1.25;
+        }
+        .markdown-body h1 { font-size: 1.5em; }
+        .markdown-body h2 { font-size: 1.25em; }
+        .markdown-body h3 { font-size: 1.1em; }
+        .markdown-body p { margin-bottom: 1em; }
+        .markdown-body ul,.markdown-body ol { margin: 0.5em 0; padding-left: 2em; }
+        .markdown-body ul { list-style: disc; }
+        .markdown-body ol { list-style: decimal; }
+        .markdown-body li { margin: 0.25em 0; }
+        .markdown-body code {
+            background-color: rgba(0,0,0,0.1); padding: 0.2em 0.4em;
+            border-radius: 0.25rem; font-family: 'Menlo','Monaco','Courier New',monospace; font-size: 0.9em;
+        }
+        .dark .markdown-body code { background-color: rgba(255,255,255,0.1); }
+        .markdown-body pre {
+            background-color: rgba(0,0,0,0.05); padding: 1em;
+            border-radius: 0.5rem; overflow-x: auto; margin: 1em 0;
+        }
+        .dark .markdown-body pre { background-color: rgba(0,0,0,0.3); }
+        .markdown-body pre code { background-color: transparent; padding: 0; }
+        .markdown-body blockquote {
+            border-left: 4px solid #10b981; padding-left: 1em; margin: 1em 0; color: #6b7280;
+        }
+        .markdown-body strong { font-weight: 600; }
+        .markdown-body table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+        .markdown-body table th,.markdown-body table td {
+            border: 1px solid rgba(0,0,0,0.1); padding: 0.5em; text-align: left;
+        }
+        .markdown-body table th { background-color: rgba(0,0,0,0.05); font-weight: 600; }
+        .dark .markdown-body table th,.dark .markdown-body table td { border-color: rgba(255,255,255,0.1); }
+        .dark .markdown-body table th { background-color: rgba(255,255,255,0.05); }
+
+        .pulse-dot { animation: pulse 1.5s cubic-bezier(0.4,0,0.6,1) infinite; }
+        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+        .scan-spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    </style>
+</head>
+
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased min-h-screen flex flex-col">
+    <!-- ── Header ─────────────────────────────────────────────────────── -->
+    <header class="sticky top-0 z-50 w-full bg-white dark:bg-background-dark border-b border-slate-200 dark:border-slate-800">
+        <div class="max-w-[1440px] mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <div class="w-8 h-8 bg-gradient-to-br from-green-500 to-blue-500 rounded-lg flex items-center justify-center text-white shadow-lg">
+                    <span class="material-symbols-outlined text-lg">health_and_safety</span>
+                </div>
+                <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">灵犀平台</h1>
+            </div>
+            <nav class="hidden md:flex items-center gap-8">
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="/dashboard">集群概览</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="/">Pod 列表</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="/store">存储卷</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="/memory">内存管理</a>
+                <a class="text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-primary transition-colors" href="/aitools">AI 工具箱</a>
+                <a class="text-sm font-bold text-ha-green border-b-2 border-ha-green py-5" href="/haagent">HA 诊断</a>
+            </nav>
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full bg-slate-200 overflow-hidden ml-2">
+                    <img alt="User Profile" class="w-full h-full object-cover"
+                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuBJq5blQRMAftLWJpTxiZJprJqmgSCdQxYsQawbg-Ddra9iSfhhc0xJoqeKEZ0_gGhOjTD0BCT1DdnpQq7GhafGMIZ5w9L-3ohr_VMngtbViq1IWo80OJlYKJnTeAJsnrR3DSHe6P2GBmZLyvRldN2J4VugN4esw21fL6mb85QbhWdGz3fZDO-XB9OJfABjLTI1GUlyih5T43BSdUi3XkRzGM0ZNKqZcFrbM9WQx6teonyPrMqzlJXwyhtQjO8zs_cwi8x-emLwJoy7" />
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-[1440px] mx-auto p-6 flex-1 flex flex-col gap-6">
+
+        <!-- ── Hero ────────────────────────────────────────────────────── -->
+        <div class="bg-gradient-to-r from-green-600 to-blue-600 rounded-2xl p-8 text-white shadow-xl">
+            <div class="flex items-center gap-4 mb-4">
+                <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <span class="material-symbols-outlined text-3xl">smart_toy</span>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-bold">K3s 高可用智能诊断 Agent</h2>
+                    <p class="text-green-100 text-sm mt-1">自动扫描集群 → 识别 HA 风险 → Qwen AI 给出优化建议</p>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-3 mt-6">
+                <div class="flex items-center gap-2 bg-white/15 rounded-lg px-3 py-2 text-sm">
+                    <span class="material-symbols-outlined text-base">restart_alt</span> Pod 重启检测
+                </div>
+                <div class="flex items-center gap-2 bg-white/15 rounded-lg px-3 py-2 text-sm">
+                    <span class="material-symbols-outlined text-base">tune</span> 资源限制检查
+                </div>
+                <div class="flex items-center gap-2 bg-white/15 rounded-lg px-3 py-2 text-sm">
+                    <span class="material-symbols-outlined text-base">monitor_heart</span> 探针配置检查
+                </div>
+                <div class="flex items-center gap-2 bg-white/15 rounded-lg px-3 py-2 text-sm">
+                    <span class="material-symbols-outlined text-base">diversity_3</span> 副本数 & PDB
+                </div>
+                <div class="flex items-center gap-2 bg-white/15 rounded-lg px-3 py-2 text-sm">
+                    <span class="material-symbols-outlined text-base">lan</span> Ingress 健康状态
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Stats Cards + Scan Button ──────────────────────────────── -->
+        <div class="flex flex-col lg:flex-row gap-4">
+            <!-- Stats -->
+            <div id="stats-panel" class="flex-1 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex flex-col items-center gap-1 shadow-sm">
+                    <span id="stat-nodes" class="text-2xl font-bold text-slate-700 dark:text-slate-200">--</span>
+                    <span class="text-xs text-slate-500">节点</span>
+                </div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex flex-col items-center gap-1 shadow-sm">
+                    <span id="stat-pods" class="text-2xl font-bold text-slate-700 dark:text-slate-200">--</span>
+                    <span class="text-xs text-slate-500">Pod</span>
+                </div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex flex-col items-center gap-1 shadow-sm">
+                    <span id="stat-deployments" class="text-2xl font-bold text-slate-700 dark:text-slate-200">--</span>
+                    <span class="text-xs text-slate-500">Deployment</span>
+                </div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex flex-col items-center gap-1 shadow-sm">
+                    <span id="stat-pod-issues" class="text-2xl font-bold text-ha-red">--</span>
+                    <span class="text-xs text-slate-500">Pod 问题</span>
+                </div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex flex-col items-center gap-1 shadow-sm">
+                    <span id="stat-dep-issues" class="text-2xl font-bold text-ha-yellow">--</span>
+                    <span class="text-xs text-slate-500">Deployment 风险</span>
+                </div>
+                <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex flex-col items-center gap-1 shadow-sm">
+                    <span id="stat-ingress" class="text-2xl font-bold text-ha-blue">--</span>
+                    <span class="text-xs text-slate-500">Ingress</span>
+                </div>
+            </div>
+
+            <!-- Scan Button -->
+            <div class="flex flex-col gap-3 lg:w-56">
+                <button id="btn-scan" onclick="startScan()"
+                    class="flex items-center justify-center gap-2 bg-ha-green hover:bg-emerald-600 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg hover:shadow-emerald-200 active:scale-95 text-base">
+                    <span class="material-symbols-outlined text-xl">search</span>
+                    一键扫描 + AI 分析
+                </button>
+                <button onclick="loadSummary()"
+                    class="flex items-center justify-center gap-2 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-medium py-3 px-6 rounded-xl transition-all shadow-sm text-sm">
+                    <span class="material-symbols-outlined text-lg">refresh</span>
+                    仅刷新数据
+                </button>
+            </div>
+        </div>
+
+        <!-- ── Issue Tables ────────────────────────────────────────────── -->
+        <div id="issue-tables" class="hidden grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Pod Issues -->
+            <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                <div class="px-4 py-3 bg-red-50 dark:bg-red-950/30 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-ha-red text-lg">error</span>
+                    <span class="font-semibold text-slate-800 dark:text-white text-sm">问题 Pod</span>
+                    <span id="badge-pod-issues" class="ml-auto text-xs bg-ha-red text-white px-2 py-0.5 rounded-full font-bold">0</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="bg-slate-50 dark:bg-slate-900">
+                                <th class="px-4 py-2 text-left text-slate-500 font-medium">命名空间/名称</th>
+                                <th class="px-4 py-2 text-left text-slate-500 font-medium">状态</th>
+                                <th class="px-4 py-2 text-right text-slate-500 font-medium">重启</th>
+                                <th class="px-4 py-2 text-center text-slate-500 font-medium">OOM</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pod-issues-tbody" class="divide-y divide-slate-100 dark:divide-slate-700">
+                            <tr><td colspan="4" class="px-4 py-6 text-center text-slate-400 text-xs">暂无数据，请先扫描</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Deployment Issues -->
+            <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                <div class="px-4 py-3 bg-yellow-50 dark:bg-yellow-950/30 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-ha-yellow text-lg">warning</span>
+                    <span class="font-semibold text-slate-800 dark:text-white text-sm">Deployment 配置风险</span>
+                    <span id="badge-dep-issues" class="ml-auto text-xs bg-ha-yellow text-white px-2 py-0.5 rounded-full font-bold">0</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="bg-slate-50 dark:bg-slate-900">
+                                <th class="px-4 py-2 text-left text-slate-500 font-medium">命名空间/名称</th>
+                                <th class="px-4 py-2 text-right text-slate-500 font-medium">副本</th>
+                                <th class="px-4 py-2 text-left text-slate-500 font-medium">风险项</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dep-issues-tbody" class="divide-y divide-slate-100 dark:divide-slate-700">
+                            <tr><td colspan="3" class="px-4 py-6 text-center text-slate-400 text-xs">暂无数据，请先扫描</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── AI Analysis Panel ───────────────────────────────────────── -->
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col">
+            <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3 bg-slate-50/50 dark:bg-slate-900/50">
+                <span class="w-2 h-2 rounded-full bg-ha-green pulse-dot"></span>
+                <h3 class="font-bold text-slate-800 dark:text-white">Qwen AI 优化建议</h3>
+                <span id="analysis-status" class="ml-auto text-xs text-slate-400">等待扫描...</span>
+            </div>
+            <div id="analysis-content" class="p-6 min-h-48 text-slate-500 dark:text-slate-400 text-sm flex items-start">
+                <div class="flex flex-col items-center gap-3 w-full py-8 text-center">
+                    <span class="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-600">smart_toy</span>
+                    <p class="text-slate-400">点击"一键扫描 + AI 分析"，Agent 将自动采集集群数据并由 Qwen 生成优化建议。</p>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        marked.setOptions({
+            breaks: true,
+            highlight: function(code, lang) {
+                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                return hljs.highlight(code, { language }).value;
+            },
+            langPrefix: 'hljs language-'
+        });
+
+        async function loadSummary() {
+            updateStats('--', '--', '--', '--', '--', '--');
+            try {
+                const resp = await fetch('/haagent/summary');
+                const data = await resp.json();
+                if (!data.success) {
+                    showSummaryError(data.error);
+                    return;
+                }
+                updateStats(
+                    data.readyNodes + '/' + data.totalNodes,
+                    data.runningPods + '/' + data.totalPods,
+                    data.totalDeployments,
+                    data.podIssueCount,
+                    data.deploymentIssueCount,
+                    data.totalIngresses
+                );
+                renderPodIssues(data.podIssues || []);
+                renderDepIssues(data.deploymentIssues || []);
+                document.getElementById('issue-tables').classList.remove('hidden');
+                document.getElementById('issue-tables').classList.add('grid');
+            } catch (e) {
+                showSummaryError(e.message);
+            }
+        }
+
+        function updateStats(nodes, pods, deps, podIssues, depIssues, ingress) {
+            document.getElementById('stat-nodes').textContent = nodes;
+            document.getElementById('stat-pods').textContent = pods;
+            document.getElementById('stat-deployments').textContent = deps;
+            document.getElementById('stat-pod-issues').textContent = podIssues;
+            document.getElementById('stat-dep-issues').textContent = depIssues;
+            document.getElementById('stat-ingress').textContent = ingress;
+        }
+
+        function showSummaryError(msg) {
+            document.getElementById('stat-nodes').textContent = '!';
+            console.error('Summary error:', msg);
+        }
+
+        function renderPodIssues(issues) {
+            const tbody = document.getElementById('pod-issues-tbody');
+            document.getElementById('badge-pod-issues').textContent = issues.length;
+            if (!issues.length) {
+                tbody.innerHTML = '<tr><td colspan="4" class="px-4 py-6 text-center text-ha-green text-xs font-medium">✓ 无异常 Pod</td></tr>';
+                return;
+            }
+            tbody.innerHTML = issues.map(p => {
+                const statusColor = p.phase === 'Running' ? 'text-ha-green' : 'text-ha-red';
+                const restartColor = p.restarts >= 10 ? 'text-ha-red font-bold' : p.restarts >= 5 ? 'text-ha-yellow font-semibold' : '';
+                return `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                    <td class="px-4 py-2 font-mono text-slate-700 dark:text-slate-300">${esc(p.namespace)}/<br><span class="text-xs">${esc(p.name)}</span></td>
+                    <td class="px-4 py-2 ${statusColor}">${esc(p.phase)}</td>
+                    <td class="px-4 py-2 text-right ${restartColor}">${p.restarts}</td>
+                    <td class="px-4 py-2 text-center">${p.oomKilled ? '<span class="text-ha-red font-bold">OOM</span>' : '<span class="text-slate-300">-</span>'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function renderDepIssues(issues) {
+            const tbody = document.getElementById('dep-issues-tbody');
+            document.getElementById('badge-dep-issues').textContent = issues.length;
+            if (!issues.length) {
+                tbody.innerHTML = '<tr><td colspan="3" class="px-4 py-6 text-center text-ha-green text-xs font-medium">✓ 无配置风险</td></tr>';
+                return;
+            }
+            tbody.innerHTML = issues.map(d => {
+                const risks = [];
+                if (d.singleReplica) risks.push('<span class="bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 px-1.5 py-0.5 rounded text-[10px]">单副本</span>');
+                if (d.missingResourceRequests) risks.push('<span class="bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded text-[10px]">缺requests</span>');
+                if (d.missingResourceLimits) risks.push('<span class="bg-orange-100 dark:bg-orange-900/50 text-orange-700 dark:text-orange-300 px-1.5 py-0.5 rounded text-[10px]">缺limits</span>');
+                if (d.missingLivenessProbe) risks.push('<span class="bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 px-1.5 py-0.5 rounded text-[10px]">缺liveness</span>');
+                if (d.missingReadinessProbe) risks.push('<span class="bg-yellow-100 dark:bg-yellow-900/50 text-yellow-700 dark:text-yellow-300 px-1.5 py-0.5 rounded text-[10px]">缺readiness</span>');
+                if (d.missingPdb) risks.push('<span class="bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded text-[10px]">缺PDB</span>');
+                return `<tr class="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                    <td class="px-4 py-2 font-mono text-slate-700 dark:text-slate-300">${esc(d.namespace)}/<br><span class="text-xs">${esc(d.name)}</span></td>
+                    <td class="px-4 py-2 text-right ${d.replicas < 2 ? 'text-ha-red font-bold' : ''}">${d.replicas}</td>
+                    <td class="px-4 py-2"><div class="flex flex-wrap gap-1">${risks.join('')}</div></td>
+                </tr>`;
+            }).join('');
+        }
+
+        async function startScan() {
+            const btn = document.getElementById('btn-scan');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="material-symbols-outlined text-xl scan-spin">sync</span> 扫描中...';
+
+            // Load summary first
+            await loadSummary();
+
+            // Then stream AI analysis
+            const statusEl = document.getElementById('analysis-status');
+            const contentEl = document.getElementById('analysis-content');
+            statusEl.textContent = '正在调用 Qwen AI...';
+            contentEl.innerHTML = '<div class="flex items-center gap-3 text-slate-400"><span class="material-symbols-outlined text-2xl scan-spin text-ha-green">smart_toy</span><span class="text-sm">Agent 正在分析集群数据，请稍候...</span></div>';
+
+            try {
+                const response = await fetch('/haagent/analyze', { method: 'POST' });
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let fullText = '';
+
+                contentEl.innerHTML = '<div class="markdown-body text-sm text-slate-800 dark:text-slate-200" id="ai-output"></div>';
+                const outputEl = document.getElementById('ai-output');
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    const chunk = decoder.decode(value, { stream: true });
+                    for (const line of chunk.split('\n')) {
+                        if (line.startsWith('data:')) {
+                            const data = line.substring(5);
+                            if (!data.length) continue;
+                            fullText += data;
+                            let formatted = fullText.replace(/([^\n])\s*(---)/g, '$1\n\n$2\n\n');
+                            formatted = formatted.replace(/([^\n])\s*(#{1,6}\s)/g, '$1\n\n$2');
+                            outputEl.innerHTML = marked.parse(formatted);
+                            const container = outputEl.closest('#analysis-content');
+                            container.scrollTop = container.scrollHeight;
+                        }
+                    }
+                }
+                statusEl.textContent = '分析完成 ✓';
+            } catch (e) {
+                contentEl.innerHTML = `<div class="text-ha-red text-sm p-4 bg-red-50 dark:bg-red-950/30 rounded-lg">AI 分析失败: ${esc(e.message)}</div>`;
+                statusEl.textContent = '分析失败';
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span class="material-symbols-outlined text-xl">search</span> 一键扫描 + AI 分析';
+            }
+        }
+
+        function esc(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        // Auto-load summary on page load
+        loadSummary();
+    </script>
+</body>
+</html>
