@@ -1,0 +1,120 @@
+# ============================================================
+# Nacos 单机模式部署到 k3s（适合开发 / 测试环境）
+# 生产环境建议使用 Nacos 集群模式并挂载外部 MySQL
+# 部署方式:
+#   kubectl apply -f k8s/nacos.yaml
+# ============================================================
+
+# ── 1. PersistentVolumeClaim：保存 Nacos 内嵌 Derby 数据 ──
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nacos-data-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# ── 2. Deployment：Nacos Server（单机模式）──
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nacos
+  namespace: default
+  labels:
+    app: nacos
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nacos
+  template:
+    metadata:
+      labels:
+        app: nacos
+    spec:
+      containers:
+        - name: nacos
+          # 官方镜像；如离线环境请先推送到内网 Harbor，然后修改此 image 值
+          image: nacos/nacos-server:v2.3.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8848
+              protocol: TCP
+            - name: grpc
+              containerPort: 9848
+              protocol: TCP
+          env:
+            # 单机模式
+            - name: MODE
+              value: standalone
+            # 关闭鉴权（开发环境）；生产环境请设为 true 并配置 secret
+            - name: NACOS_AUTH_ENABLE
+              value: "false"
+            # JVM 内存，按实际情况调整
+            - name: JVM_XMS
+              value: 256m
+            - name: JVM_XMX
+              value: 256m
+            - name: JVM_XMN
+              value: 128m
+          volumeMounts:
+            - name: nacos-data
+              mountPath: /home/nacos/data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "384Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /nacos/actuator/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /nacos/actuator/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: nacos-data
+          persistentVolumeClaim:
+            claimName: nacos-data-pvc
+
+---
+# ── 3. Service：ClusterIP（集群内访问）+ NodePort（外部访问控制台）──
+apiVersion: v1
+kind: Service
+metadata:
+  name: nacos-svc
+  namespace: default
+  labels:
+    app: nacos
+spec:
+  type: NodePort
+  selector:
+    app: nacos
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8848
+      targetPort: http
+      nodePort: 30848   # 浏览器访问: http://<节点IP>:30848/nacos
+    - name: grpc
+      protocol: TCP
+      port: 9848
+      targetPort: grpc
+      nodePort: 30948

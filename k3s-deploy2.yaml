@@ -85,6 +85,15 @@ spec:
                 -XX:MaxRAMPercentage=75.0
                 -XX:InitialRAMPercentage=50.0
                 -Djava.security.egd=file:/dev/./urandom
+            # Nacos 配置中心地址（与 nacos-svc Service 名称对应）
+            - name: NACOS_SERVER_ADDR
+              value: "nacos-svc.default.svc.cluster.local:8848"
+            # Nacos 命名空间（留空表示 public）
+            - name: NACOS_NAMESPACE
+              value: ""
+            # Nacos 配置分组
+            - name: NACOS_GROUP
+              value: "DEFAULT_GROUP"
 
 ---
 apiVersion: v1
