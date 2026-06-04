@@ -163,7 +163,11 @@ public class ReleaseService {
                     Thread.sleep(3000);
                     client.batch().v1().jobs().inNamespace("default").resource(releaseJob).create();
                 } else {
-                    record.fail("K8s API 错误 (" + code + "): " + e.getMessage());
+                    String hint = code == -1
+                            ? " — 连不上 K8s API Server(网络/防火墙到 6443、kubeconfig server 地址、或 TLS)。"
+                            : "";
+                    record.fail("K8s API 错误 (" + code + "): " + e.getMessage() + hint
+                            + " | 根因: " + rootCauseMsg(e));
                     broadcastStatus(record);
                     return;
                 }
@@ -273,6 +277,17 @@ public class ReleaseService {
 
     private static String b64(String s) {
         return Base64.getEncoder().encodeToString(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** 取异常链最深处的根因(类名 + 消息)。 */
+    private static String rootCauseMsg(Throwable t) {
+        Throwable c = t;
+        int guard = 0;
+        while (c.getCause() != null && c.getCause() != c && guard++ < 20) {
+            c = c.getCause();
+        }
+        String msg = c.getMessage();
+        return c.getClass().getSimpleName() + (msg != null ? ": " + msg : "");
     }
 
     private static String jsonEscape(String s) {
@@ -457,8 +472,12 @@ public class ReleaseService {
         buildCmdBuilder.append("  echo '[INFO] Dockerfile.release:' && cat /workspace/Dockerfile.release; ");
         buildCmdBuilder.append("else ");
         buildCmdBuilder.append("  if [ \"$RUNTIME\" = 'auto' ] || [ -z \"$RUNTIME\" ]; then ");
-        buildCmdBuilder.append("    if [ -f \"/workspace/$REQ_PATH\" ] || [ -f /workspace/requirements.txt ]; then RUNTIME=python; ");
-        buildCmdBuilder.append("    elif [ -f /workspace/pom.xml ] || [ -f /workspace/build.gradle ]; then RUNTIME=java; ");
+        buildCmdBuilder.append("    HAS_PY=0; HAS_JAVA=0; ");
+        buildCmdBuilder.append("    if [ -f \"/workspace/$REQ_PATH\" ] || [ -f /workspace/requirements.txt ]; then HAS_PY=1; fi; ");
+        buildCmdBuilder.append("    if [ -f /workspace/pom.xml ] || [ -f /workspace/build.gradle ]; then HAS_JAVA=1; fi; ");
+        buildCmdBuilder.append("    if [ \"$HAS_PY\" = 1 ] && [ \"$HAS_JAVA\" = 1 ]; then echo '[ERROR] 同时检测到 Java(pom.xml/build.gradle) 与 Python(requirements.txt) 构建文件, 无法自动判定语言; 请在表单显式选择 runtime=java 或 python(避免 Python/Java 流水线混淆)' && exit 1; ");
+        buildCmdBuilder.append("    elif [ \"$HAS_PY\" = 1 ]; then RUNTIME=python; ");
+        buildCmdBuilder.append("    elif [ \"$HAS_JAVA\" = 1 ]; then RUNTIME=java; ");
         buildCmdBuilder.append("    elif [ -f /workspace/pyproject.toml ] || [ -f /workspace/Pipfile ]; then echo '[ERROR] 检测到 pyproject/Pipfile 但缺少 requirements.txt; 本期未支持 Poetry/Pipenv, 请先 poetry export -f requirements.txt -o requirements.txt 或自带 Dockerfile' && exit 1; ");
         buildCmdBuilder.append("    else echo '[ERROR] 无法识别项目类型, 请显式指定 runtime(java/python) 或自带 Dockerfile' && exit 1; fi; ");
         buildCmdBuilder.append("  fi; ");

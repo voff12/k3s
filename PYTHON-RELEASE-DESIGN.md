@@ -128,7 +128,12 @@ CMD ["gunicorn", "-b", "0.0.0.0:<appPort>", "<appModule>"]
 1. **仓库存在 Dockerfile → 永远走 `dockerfile` 模式**(仅重写 FROM 到本地 registry),与 `runtime` 选择、与语言无关。此时 `runtime` 字段**仅用于决定部署端口 `appPort` 等运行期参数**,不覆盖用户的构建产物。
 2. 仓库无 Dockerfile 时,看 `runtime`:
    - 显式 `java` / `python` → 用对应模板生成 Dockerfile。
-   - `auto` → 按文件特征探测:`pom.xml`/`build.gradle` → java;**`requirements.txt` → python**;都没有 → 失败,提示「请显式指定 runtime」。
+   - `auto` → 按文件特征探测:
+     - **同时存在 `pom.xml`/`build.gradle` 与 `requirements.txt` → 直接报错**,要求显式指定 runtime(防止 Java 项目因辅助 `requirements.txt` 被误判成 Python、或反向误判 —— 杜绝 Python/Java 流水线混淆);
+     - 仅 `requirements.txt` → python;
+     - 仅 `pom.xml`/`build.gradle` → java;
+     - 仅 `pyproject.toml`/`Pipfile`(无 requirements.txt)→ 报错(Poetry/Pipenv 未支持);
+     - 都没有 → 失败,提示「请显式指定 runtime」。
 
 > 即:**Dockerfile 优先于一切**;只有在没有 Dockerfile 时,显式 `runtime` 才生效;`auto` 是显式为空时的兜底。
 

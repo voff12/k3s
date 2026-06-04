@@ -270,7 +270,7 @@ harbor.password=Harbor12345      # Harbor 密码
 
 | runtime | 行为 |
 |---------|------|
-| `auto`(默认) | 仓库有 Dockerfile → 用之;否则探测 `requirements.txt`→Python、`pom.xml`→Java;纯 Poetry/Pipenv(无 requirements.txt)→ 报错 |
+| `auto`(默认) | 仓库有 Dockerfile → 用之;否则探测:**同时有 `pom.xml` 与 `requirements.txt` → 报错(要求显式选 runtime,防 Java/Python 误判)**;仅 `requirements.txt`→Python;仅 `pom.xml`→Java;纯 Poetry/Pipenv(无 requirements.txt)→ 报错 |
 | `java` | 多阶段(Maven 打包 + JRE 运行) |
 | `python` | 单阶段(`pip install` + gunicorn/uvicorn) |
 | `dockerfile` | 强制使用仓库自带 Dockerfile |

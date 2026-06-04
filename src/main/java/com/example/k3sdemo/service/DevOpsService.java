@@ -131,6 +131,10 @@ public class DevOpsService {
             // ========== Create Job upfront during Clone step ==========
             run.advanceTo(PipelineRun.Status.CLONING);
             broadcastStatus(run);
+            try {
+                run.addLog("[INFO] K8s API Server: " + client.getConfiguration().getMasterUrl());
+            } catch (Exception ignore) {
+            }
             run.addLog("[INFO] ➜ 步骤1/5: 代码克隆...");
             if (config.hasGitAuth()) {
                 run.addLog("[INFO] 使用 Git Token 认证克隆私有仓库: " + config.getGitUrl());
@@ -161,7 +165,12 @@ public class DevOpsService {
                     broadcastStatus(run);
                     return;
                 } else {
-                    run.fail("K8s API 错误 (" + code + "): " + e.getMessage());
+                    // code == -1 多为传输层错误(连不上 API Server / 超时 / TLS / DNS)
+                    String hint = code == -1
+                            ? " — 连不上 K8s API Server(网络/防火墙到 6443、kubeconfig server 地址、或 TLS)。"
+                            : "";
+                    run.fail("K8s API 错误 (" + code + "): " + e.getMessage() + hint
+                            + " | 根因: " + rootCauseMsg(e));
                     broadcastStatus(run);
                     return;
                 }
@@ -958,6 +967,17 @@ public class DevOpsService {
     private static final String PY_DOCKERIGNORE =
             ".git\n__pycache__/\n*.pyc\n*.pyo\n.venv/\nvenv/\n.pytest_cache/\n.env\n";
 
+    /** 取异常链最深处的根因(类名 + 消息),把笼统的 "An error has occurred." 翻译成可定位的原因。 */
+    private static String rootCauseMsg(Throwable t) {
+        Throwable c = t;
+        int guard = 0;
+        while (c.getCause() != null && c.getCause() != c && guard++ < 20) {
+            c = c.getCause();
+        }
+        String msg = c.getMessage();
+        return c.getClass().getSimpleName() + (msg != null ? ": " + msg : "");
+    }
+
     /** base64 编码(无换行),用于把生成的 Dockerfile 经 shell 写入 workspace。 */
     private static String b64(String s) {
         return Base64.getEncoder().encodeToString(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -1155,8 +1175,13 @@ public class DevOpsService {
                         "  echo '[INFO] 重写后 Dockerfile:' && cat \"$DF\"; " +
                         "else " +
                         "  if [ \"$RUNTIME\" = 'auto' ] || [ -z \"$RUNTIME\" ]; then " +
-                        "    if [ -f \"/workspace/$REQ_PATH\" ] || [ -f /workspace/requirements.txt ]; then RUNTIME=python; " +
-                        "    elif [ -f /workspace/pom.xml ] || [ -f /workspace/build.gradle ]; then RUNTIME=java; " +
+                        "    HAS_PY=0; HAS_JAVA=0; " +
+                        "    if [ -f \"/workspace/$REQ_PATH\" ] || [ -f /workspace/requirements.txt ]; then HAS_PY=1; fi; " +
+                        "    if [ -f /workspace/pom.xml ] || [ -f /workspace/build.gradle ]; then HAS_JAVA=1; fi; " +
+                        "    if [ \"$HAS_PY\" = 1 ] && [ \"$HAS_JAVA\" = 1 ]; then " +
+                        "      echo '[ERROR] 同时检测到 Java(pom.xml/build.gradle) 与 Python(requirements.txt) 构建文件, 无法自动判定语言; 请在表单显式选择 runtime=java 或 python(避免 Python/Java 流水线混淆)' && exit 1; " +
+                        "    elif [ \"$HAS_PY\" = 1 ]; then RUNTIME=python; " +
+                        "    elif [ \"$HAS_JAVA\" = 1 ]; then RUNTIME=java; " +
                         "    elif [ -f /workspace/pyproject.toml ] || [ -f /workspace/Pipfile ]; then " +
                         "      echo '[ERROR] 检测到 pyproject/Pipfile 但缺少 requirements.txt; 本期未支持 Poetry/Pipenv, 请先 poetry export -f requirements.txt -o requirements.txt 或自带 Dockerfile' && exit 1; " +
                         "    else echo '[ERROR] 无法识别项目类型, 请显式指定 runtime(java/python) 或自带 Dockerfile' && exit 1; fi; " +
