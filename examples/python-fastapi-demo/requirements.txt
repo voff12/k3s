@@ -1,0 +1,3 @@
+fastapi==0.111.0
+# uvicorn 平台会按 pythonServer=uvicorn 自动补装;此处显式锁版本便于本地一致运行
+uvicorn==0.30.1

@@ -14,8 +14,10 @@
 | 部署管理 | 创建、扩缩容、更新 | 镜像更新、资源配置、环境变量修改 |
 | 内存管理 | 集群内存分析 | 节点/Pod 内存排行、AI 优化建议、一键调整 |
 | 存储管理 | PV/PVC与磁盘 | PersistentVolume状态、PVC绑定关系、节点磁盘用量 |
-| CI/CD 流水线 | 代码到部署全链路 | Git → Maven → Kaniko → K3s，实时日志流 |
-| 应用发布 | Git 到 Harbor 到 K3s | Git 克隆 → Maven 构建 → Kaniko 推送 Harbor → K3s 部署 |
+| CI/CD 流水线 | 代码到部署全链路 | Git → 构建 → Kaniko → K3s，实时日志流;支持 Java / Python / 自定义 Dockerfile |
+| 应用发布 | Git 到 Harbor 到 K3s | Git 克隆 → 构建 → Kaniko 推送 Harbor → K3s 部署 |
+| 多分支合并预览 | 多分支集成联调 | 选 base + N 分支合并 → 独立 `preview-<id>` 命名空间 → NodePort 访问,TTL 自动回收 |
+| 多语言运行时 | Java / Python | runtime 选择(auto 探测);Python 走 pip + gunicorn/uvicorn,端口可配置 |
 | AI 工具 | Kubernetes 智能问答 | 基于通义千问，流式响应，Markdown 渲染 |
 
 ---
@@ -257,6 +259,50 @@ harbor.password=Harbor12345      # Harbor 密码
 - 确保 Harbor 用户对指定项目有 **push** 权限
 - Harbor 认证使用 Base64 编码，自动处理
 - 如果 Harbor 使用自签名证书，Kaniko 会自动跳过 TLS 验证
+
+---
+
+## 多语言运行时(Java / Python)
+
+两套流水线(`/devops` 离线 / `/release` Harbor)均支持通过 **运行时 Runtime** 选择构建方式。完整设计见 [`PYTHON-RELEASE-DESIGN.md`](PYTHON-RELEASE-DESIGN.md),验证示例见 [`examples/`](examples/)。
+
+### Runtime 选择与优先级
+
+| runtime | 行为 |
+|---------|------|
+| `auto`(默认) | 仓库有 Dockerfile → 用之;否则探测 `requirements.txt`→Python、`pom.xml`→Java;纯 Poetry/Pipenv(无 requirements.txt)→ 报错 |
+| `java` | 多阶段(Maven 打包 + JRE 运行) |
+| `python` | 单阶段(`pip install` + gunicorn/uvicorn) |
+| `dockerfile` | 强制使用仓库自带 Dockerfile |
+
+> **Dockerfile 优先**:只要仓库有 Dockerfile,一律优先使用(仅重写 FROM 到本地 registry/Harbor),runtime 仅决定部署端口等。
+
+### Python 字段
+
+| 字段 | 默认 | 说明 |
+|------|------|------|
+| Python 版本 | `3.11` | 基础镜像 `python:<ver>-slim` |
+| 应用端口 appPort | `8000` | 容器监听端口,端到端生效(Service targetPort 同步) |
+| 服务类型 pythonServer | `gunicorn` | `gunicorn`(WSGI:Flask/Django)/ `uvicorn`(ASGI:FastAPI) |
+| 入口模块 appModule | `app:app` | WSGI/ASGI 入口 |
+| requirements 路径 | `requirements.txt` | 缺失时跳过 pip 安装 |
+| 需要编译依赖 buildDeps | 关 | 含 C 扩展且无 wheel 时开启(临时装 build-essential gcc) |
+| 自定义启动命令 startCommand | 空 | 覆盖默认 CMD(Django 等用 `migrate && gunicorn ...`) |
+
+### 离线前置(必须)
+
+1. **预热 Python 基础镜像**:`bash prewarm-images.sh`(已含 `python:3.x-slim`);并推送到内网 Harbor:
+   ```bash
+   docker pull python:3.11-slim
+   docker tag  python:3.11-slim <harbor>/library/python:3.11-slim
+   docker push <harbor>/library/python:3.11-slim
+   ```
+2. **PyPI 索引必须可达**:`pip install` 从 index 拉包(与 `mvn` 连 aliyun 同理)。"离线"仅指镜像离线,依赖索引(公共镜像 / 内网私有 PyPI)需对 K3s 节点可达。可用 `pip.index` 配置或 `-Dpip.index=...` 覆盖,默认清华源。
+
+### 能力边界
+
+- Flask / FastAPI 单应用开箱即用;**Django** 等需迁移/静态/环境变量的框架,请用 `startCommand` 或自带 Dockerfile。
+- 本期仅支持 pip + requirements.txt(Poetry/Pipenv 需先 `poetry export`)。
 
 ---
 

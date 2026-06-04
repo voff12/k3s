@@ -25,10 +25,15 @@ kubectl apply -f k8s-rbac.yaml
 ```
 
 **这将创建：**
-- **ClusterRole**：授予集群级资源的只读权限（节点、持久卷、事件）以及跨所有命名空间的只读权限
-- **Role**：授予 default 命名空间的写权限（pods、deployments、replicasets 和 **deployments/scale**）
-- **ClusterRoleBinding**：将集群级只读权限授予 `default` 服务账户
+- **ClusterRole**：授予集群级只读权限（节点、持久卷、事件）；**并授予跨命名空间的写权限**（namespaces、deployments、services、secrets、jobs、pods/exec 等），以支持**合并预览部署**按需创建 `preview-<id>` 命名空间并跨命名空间部署
+- **Role**：在 default 命名空间内重复授予写权限（向后兼容保留，权限已由 ClusterRole 覆盖）
+- **ClusterRoleBinding**：将上述集群权限授予 `default` 服务账户
 - **RoleBinding**：将 default 命名空间的写权限授予 `default` 服务账户
+
+> **合并预览部署相关权限（v2 新增）：**
+> - `namespaces`: get/list/watch/**create/delete** — 预览环境每个合并集独立命名空间 `preview-<mergeSetId>`，用完自动回收
+> - `deployments`/`services`/`secrets`/`replicasets`: 由仅 default 的 Role **提升为 ClusterRole**，因为预览环境部署在 `default` 之外的命名空间
+> - 若不做合并预览部署，仅用单分支发布，旧的 default Role 权限即已足够
 
 **中文说明：** 这是最简单的配置方式，直接为默认服务账户授予权限，无需修改部署配置。
 

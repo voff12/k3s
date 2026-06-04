@@ -213,48 +213,60 @@
                                         <p class="text-[10px] text-slate-400" id="step0label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 1: Multi-stage Build (Maven + Image) -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="1">
+                                <!-- Step 1: Branch Merge (仅合并部署模式显示) -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="1"
+                                    id="stepMergeWrap">
                                     <div id="step1"
+                                        class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
+                                        <span class="material-symbols-outlined">merge</span>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-xs font-bold">分支合并</p>
+                                        <p class="text-[10px] text-slate-400" id="step1label">等待中</p>
+                                    </div>
+                                </div>
+                                <!-- Step 2: Multi-stage Build (Maven + Image) -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="2">
+                                    <div id="step2"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">build</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">多阶段构建</p>
-                                        <p class="text-[10px] text-slate-400" id="step1label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step2label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 2: Import to Node -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="2">
-                                    <div id="step2"
+                                <!-- Step 3: Import to Node -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="3">
+                                    <div id="step3"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">download_for_offline</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">导入节点</p>
-                                        <p class="text-[10px] text-slate-400" id="step2label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step3label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 3: Deploy -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="3">
-                                    <div id="step3"
+                                <!-- Step 4: Deploy -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="4">
+                                    <div id="step4"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">rocket_launch</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">K3s 部署</p>
-                                        <p class="text-[10px] text-slate-400" id="step3label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step4label">等待中</p>
                                     </div>
                                 </div>
-                                <!-- Step 4: Complete -->
-                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="4">
-                                    <div id="step4"
+                                <!-- Step 5: Complete -->
+                                <div class="flex flex-col items-center gap-2 bg-white px-3 z-10" data-step="5">
+                                    <div id="step5"
                                         class="size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300">
                                         <span class="material-symbols-outlined">check_circle</span>
                                     </div>
                                     <div class="text-center">
                                         <p class="text-xs font-bold">完成</p>
-                                        <p class="text-[10px] text-slate-400" id="step4label">等待中</p>
+                                        <p class="text-[10px] text-slate-400" id="step5label">等待中</p>
                                     </div>
                                 </div>
                             </div>
@@ -379,6 +391,81 @@
                                         </div>
                                     </div>
                                 </div>
+
+                                <!-- Merge Preview Info (仅合并部署模式显示) -->
+                                <div id="mergeInfoCard"
+                                    class="hidden bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                                    <h4 class="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                                        <span class="material-symbols-outlined text-primary text-lg">merge</span>
+                                        合并预览
+                                    </h4>
+                                    <div class="space-y-2.5">
+                                        <div>
+                                            <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-0.5">
+                                                基底分支 (base)</p>
+                                            <p class="text-xs font-mono text-slate-700" id="infoBaseBranch">—</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-0.5">
+                                                合并分支</p>
+                                            <div class="flex flex-wrap gap-1" id="infoFeatureBranches">
+                                                <span class="text-xs text-slate-400">—</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-0.5">
+                                                Merge Commit</p>
+                                            <p class="text-xs font-mono text-slate-700" id="infoMergeCommit">—</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-0.5">
+                                                预览命名空间</p>
+                                            <p class="text-xs font-mono text-slate-700" id="infoPreviewNs">—</p>
+                                        </div>
+                                        <div id="previewUrlWrap" class="hidden">
+                                            <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-0.5">
+                                                预览访问地址</p>
+                                            <a id="infoPreviewUrl" href="#" target="_blank"
+                                                class="text-xs font-mono text-primary hover:underline break-all">—</a>
+                                        </div>
+                                        <!-- 冲突文件 -->
+                                        <div id="conflictWrap"
+                                            class="hidden p-2.5 bg-danger/5 rounded-lg border border-danger/20">
+                                            <p class="text-[10px] text-danger uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
+                                                <span class="material-symbols-outlined text-sm">warning</span>
+                                                合并冲突文件
+                                            </p>
+                                            <ul id="conflictFiles"
+                                                class="text-xs font-mono text-danger space-y-0.5 list-disc list-inside">
+                                            </ul>
+                                            <p class="text-[11px] text-slate-500 mt-1.5">请人工解决冲突后重试</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Preview Environments -->
+                    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                            <h3 class="font-bold text-slate-900 flex items-center gap-2">
+                                <span class="material-symbols-outlined text-primary">dns</span>
+                                合并预览环境
+                            </h3>
+                            <div class="flex items-center gap-3">
+                                <span class="text-xs text-slate-400" id="previewCount">0 个环境</span>
+                                <button onclick="refreshPreviews()"
+                                    class="p-1.5 text-slate-500 hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                                    title="刷新预览环境">
+                                    <span class="material-symbols-outlined text-lg">refresh</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="previewList">
+                            <div class="p-8 text-center">
+                                <span class="material-symbols-outlined text-4xl text-slate-300 mb-2">cloud_off</span>
+                                <p class="text-slate-400 text-sm">暂无预览环境</p>
                             </div>
                         </div>
                     </div>
@@ -483,6 +570,122 @@
                             class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
                     </div>
                 </div>
+                <!-- 合并部署开关 -->
+                <div class="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
+                    <div>
+                        <p class="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-primary text-lg">merge</span>
+                            多分支合并预览部署
+                        </p>
+                        <p class="text-[11px] text-slate-400 mt-0.5">选 base + N 个分支合并，部署到独立预览命名空间</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="formMergeMode" class="sr-only peer"
+                            onchange="toggleMergeMode()" />
+                        <div
+                            class="w-11 h-6 bg-slate-300 rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-transform peer-checked:after:translate-x-5">
+                        </div>
+                    </label>
+                </div>
+                <!-- 合并部署面板 (默认隐藏) -->
+                <div id="mergePanel" class="hidden space-y-4 p-4 rounded-lg border border-primary/20 bg-primary/5">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">基底分支
+                                (base)</label>
+                            <input type="text" id="formBaseBranch" value="main" placeholder="main"
+                                class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">预览 TTL
+                                (分钟)</label>
+                            <input type="number" id="formPreviewTtl" value="120" min="10"
+                                class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex items-center justify-between mb-1.5">
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider">待合并分支
+                                (可多选)</label>
+                            <button type="button" onclick="loadBranches()"
+                                class="text-[11px] text-primary hover:underline flex items-center gap-1">
+                                <span class="material-symbols-outlined text-sm">sync</span>
+                                加载远程分支
+                            </button>
+                        </div>
+                        <div id="featureBranchList"
+                            class="max-h-40 overflow-y-auto border border-slate-200 rounded-lg bg-white p-2 space-y-1">
+                            <p class="text-xs text-slate-400 p-2" id="featureBranchHint">
+                                点击「加载远程分支」拉取分支列表，或在下方手动输入
+                            </p>
+                        </div>
+                        <input type="text" id="formFeatureManual" placeholder="手动输入分支，逗号分隔，例: feat/a, feat/b"
+                            class="w-full mt-2 px-3 py-2 border border-slate-200 rounded-lg text-xs font-mono focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                    </div>
+                </div>
+                <!-- 运行时 Runtime -->
+                <div>
+                    <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">运行时
+                        Runtime</label>
+                    <select id="formRuntime" onchange="toggleRuntime()"
+                        class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white">
+                        <option value="auto">自动探测(默认)</option>
+                        <option value="java">Java(Maven)</option>
+                        <option value="python">Python(pip)</option>
+                        <option value="dockerfile">自定义 Dockerfile</option>
+                    </select>
+                    <p class="text-[11px] text-slate-400 mt-1">仓库若已有 Dockerfile 将<b>优先使用</b>(仅重写 FROM);runtime 仅决定部署端口等</p>
+                </div>
+                <!-- Python 字段面板 -->
+                <div id="pythonPanel" class="hidden space-y-4 p-4 rounded-lg border border-emerald-200 bg-emerald-50/50">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Python
+                                版本</label>
+                            <input type="text" id="formPythonVersion" value="3.11" placeholder="3.11"
+                                class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">应用端口</label>
+                            <input type="number" id="formAppPort" value="8000" min="1" max="65535"
+                                class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">服务类型</label>
+                            <select id="formPythonServer"
+                                class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 focus:border-primary bg-white">
+                                <option value="gunicorn">gunicorn (WSGI: Flask/Django)</option>
+                                <option value="uvicorn">uvicorn (ASGI: FastAPI)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">入口模块</label>
+                            <input type="text" id="formAppModule" value="app:app" placeholder="app:app"
+                                class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">requirements
+                                路径</label>
+                            <input type="text" id="formRequirementsPath" value="requirements.txt"
+                                class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        </div>
+                        <label class="flex items-center gap-2 mt-6 cursor-pointer select-none">
+                            <input type="checkbox" id="formBuildDeps" class="rounded text-primary" />
+                            <span class="text-xs text-slate-600">需要编译依赖 (gcc/build-essential)</span>
+                        </label>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">自定义启动命令
+                            <span class="text-slate-400 font-normal normal-case">(可选,覆盖默认)</span></label>
+                        <input type="text" id="formStartCommand" placeholder="留空使用 gunicorn/uvicorn 默认"
+                            class="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-primary/20 focus:border-primary" />
+                        <p class="text-[11px] text-warning mt-1">⚠ 自定义命令为逃生通道,内容由你自负(如 python manage.py migrate &amp;&amp; gunicorn ...)</p>
+                    </div>
+                </div>
                 <!-- Tag + Dockerfile -->
                 <div class="grid grid-cols-2 gap-4">
                     <div>
@@ -540,9 +743,9 @@
                     </p>
                 </div>
                 <!-- Build Command -->
-                <div>
+                <div id="buildCmdField">
                     <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">构建命令
-                        <span class="text-slate-400 font-normal normal-case">(Maven/Gradle)</span></label>
+                        <span class="text-slate-400 font-normal normal-case">(Java/Maven/Gradle)</span></label>
                     <div class="relative">
                         <span
                             class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-lg">terminal</span>
@@ -556,8 +759,8 @@
                 <!-- Hint -->
                 <div class="flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                     <span class="material-symbols-outlined text-primary text-lg mt-0.5">info</span>
-                    <p class="text-xs text-blue-700 leading-relaxed">
-                        流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、多阶段构建 (Maven 打包 + 镜像构建一体化) 并直接导入 K3s 节点 (不依赖外网)。
+                    <p class="text-xs text-blue-700 leading-relaxed" id="flowHint">
+                        流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、构建镜像并直接导入 K3s 节点 (不依赖外网)。
                         如果指定了 Deployment 名称，还会自动更新 K3s 集群中的部署。
                     </p>
                 </div>
@@ -581,6 +784,7 @@
         let currentEventSource = null;
         let currentPipelineId = null;
         let autoScroll = true;
+        let mergeView = false; // 当前查看的流水线是否为合并部署
 
         document.getElementById('autoScroll').addEventListener('change', function () {
             autoScroll = this.checked;
@@ -594,6 +798,90 @@
             document.getElementById('pipelineModal').classList.add('hidden');
         }
 
+        // ========== 运行时 Runtime ==========
+        function toggleRuntime() {
+            const rt = document.getElementById('formRuntime').value;
+            const isPy = rt === 'python';
+            document.getElementById('pythonPanel').classList.toggle('hidden', !isPy);
+            // Python 无 Maven: 隐藏「构建命令」字段
+            const bcf = document.getElementById('buildCmdField');
+            if (bcf) bcf.classList.toggle('hidden', isPy);
+            // 提示文案 runtime 感知(不出现 Maven)
+            const hint = document.getElementById('flowHint');
+            if (hint) {
+                hint.textContent = isPy
+                    ? ('流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、pip 安装(' + document.getElementById('formPythonServer').value
+                        + ')并构建镜像、直接导入 K3s 节点 (不依赖外网)。如果指定了 Deployment 名称，还会自动更新部署。')
+                    : '流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、构建镜像并直接导入 K3s 节点 (不依赖外网)。如果指定了 Deployment 名称，还会自动更新 K3s 集群中的部署。';
+            }
+        }
+
+        // 把运行时相关字段写入 config(python 字段仅在 runtime=python 时附带)
+        function applyRuntimeFields(config) {
+            const rt = document.getElementById('formRuntime').value;
+            config.runtime = rt;
+            if (rt === 'python') {
+                config.pythonVersion = document.getElementById('formPythonVersion').value.trim() || '3.11';
+                config.appPort = parseInt(document.getElementById('formAppPort').value, 10) || 0;
+                config.pythonServer = document.getElementById('formPythonServer').value;
+                config.appModule = document.getElementById('formAppModule').value.trim() || 'app:app';
+                config.requirementsPath = document.getElementById('formRequirementsPath').value.trim() || 'requirements.txt';
+                config.buildDeps = document.getElementById('formBuildDeps').checked;
+                config.startCommand = document.getElementById('formStartCommand').value.trim();
+            }
+        }
+
+        // ========== 合并部署模式 ==========
+        function toggleMergeMode() {
+            const on = document.getElementById('formMergeMode').checked;
+            document.getElementById('mergePanel').classList.toggle('hidden', !on);
+            // 合并模式下单分支字段不再使用
+            document.getElementById('formBranch').disabled = on;
+            document.getElementById('formImageTag').disabled = on;
+        }
+
+        async function loadBranches() {
+            const gitUrl = document.getElementById('formGitUrl').value.trim();
+            if (!gitUrl) { alert('请先填写 Git 仓库地址'); return; }
+            const token = document.getElementById('formGitToken').value.trim();
+            const hint = document.getElementById('featureBranchHint');
+            const list = document.getElementById('featureBranchList');
+            if (hint) hint.textContent = '加载中...';
+            try {
+                const url = '/devops/branches?gitUrl=' + encodeURIComponent(gitUrl)
+                    + (token ? '&token=' + encodeURIComponent(token) : '');
+                const resp = await fetch(url);
+                const data = await resp.json();
+                if (!data.success) {
+                    if (hint) hint.textContent = '加载失败: ' + (data.error || '未知错误') + ' — 可手动输入';
+                    return;
+                }
+                const branches = data.branches || [];
+                if (branches.length === 0) {
+                    if (hint) hint.textContent = '未发现分支，可手动输入';
+                    return;
+                }
+                const base = document.getElementById('formBaseBranch').value.trim() || 'main';
+                list.innerHTML = branches.map(b => `
+                    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 cursor-pointer ${b === base ? 'opacity-40' : ''}">
+                        <input type="checkbox" class="feature-branch-cb rounded text-primary" value="${b}" ${b === base ? 'disabled' : ''} />
+                        <span class="text-xs font-mono text-slate-700">${b}</span>
+                        ${b === base ? '<span class="text-[10px] text-slate-400">(base)</span>' : ''}
+                    </label>`).join('');
+            } catch (e) {
+                if (hint) hint.textContent = '加载失败: ' + e.message + ' — 可手动输入';
+            }
+        }
+
+        function getSelectedFeatureBranches() {
+            const checked = Array.from(document.querySelectorAll('.feature-branch-cb:checked'))
+                .map(cb => cb.value);
+            const manual = document.getElementById('formFeatureManual').value.trim();
+            const manualList = manual ? manual.split(',').map(s => s.trim()).filter(Boolean) : [];
+            // 去重合并
+            return Array.from(new Set([...checked, ...manualList]));
+        }
+
         // ========== Submit Pipeline ==========
         async function submitPipeline() {
             const gitUrl = document.getElementById('formGitUrl').value.trim();
@@ -602,11 +890,11 @@
             if (!gitUrl) { alert('请输入 Git 仓库地址'); return; }
             if (!imageName) { alert('请输入镜像名称'); return; }
 
+            const mergeMode = document.getElementById('formMergeMode').checked;
+
             const config = {
                 gitUrl: gitUrl,
-                branch: document.getElementById('formBranch').value.trim() || 'main',
                 imageName: imageName,
-                imageTag: document.getElementById('formImageTag').value.trim() || 'latest',
                 namespace: document.getElementById('formNamespace').value.trim() || 'default',
                 deploymentName: document.getElementById('formDeployment').value.trim(),
                 dockerfilePath: document.getElementById('formDockerfile').value.trim() || './Dockerfile',
@@ -615,8 +903,28 @@
                 buildCommand: document.getElementById('formBuildCommand').value.trim()
             };
 
+            applyRuntimeFields(config);
+
+            let endpoint = '/devops/pipeline/run';
+
+            if (mergeMode) {
+                const features = getSelectedFeatureBranches();
+                if (features.length === 0) {
+                    alert('合并部署至少需要选择/输入一个待合并分支');
+                    return;
+                }
+                config.baseBranch = document.getElementById('formBaseBranch').value.trim() || 'main';
+                config.featureBranches = features;
+                config.previewTtlMinutes = parseInt(document.getElementById('formPreviewTtl').value, 10) || 120;
+                config.branch = config.baseBranch;
+                endpoint = '/devops/merge-deploy/run';
+            } else {
+                config.branch = document.getElementById('formBranch').value.trim() || 'main';
+                config.imageTag = document.getElementById('formImageTag').value.trim() || 'latest';
+            }
+
             try {
-                const resp = await fetch('/devops/pipeline/run', {
+                const resp = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config)
@@ -625,6 +933,8 @@
 
                 if (data.success) {
                     hideNewPipelineModal();
+                    config.mergeDeploy = mergeMode;
+                    config.previewNamespace = data.previewNamespace;
                     activatePipeline(data.id, config);
                 } else {
                     alert('错误: ' + data.error);
@@ -638,6 +948,8 @@
         // ========== Activate Pipeline View ==========
         function activatePipeline(id, config) {
             currentPipelineId = id;
+            mergeView = !!(config && (config.mergeDeploy ||
+                (config.featureBranches && config.featureBranches.length > 0)));
 
             // Show panel
             const panel = document.getElementById('activePipelinePanel');
@@ -647,10 +959,28 @@
             document.getElementById('pipelineId').textContent = id;
             document.getElementById('pipelineMeta').textContent = config ? config.gitUrl : '';
             document.getElementById('infoGitUrl').textContent = config ? config.gitUrl : '—';
-            document.getElementById('infoBranch').textContent = config ? config.branch : '—';
-            document.getElementById('infoImage').textContent = config ? (config.imageName + ':' + config.imageTag) : '—';
-            document.getElementById('infoNamespace').textContent = config ? config.namespace : 'default';
-            document.getElementById('infoDeployment').textContent = config && config.deploymentName ? config.deploymentName : '未指定';
+            document.getElementById('infoBranch').textContent = config ? (config.branch || config.baseBranch || '—') : '—';
+            document.getElementById('infoImage').textContent = config ? (config.imageName + (config.imageTag ? ':' + config.imageTag : '')) : '—';
+            document.getElementById('infoNamespace').textContent = mergeView ? (config.previewNamespace || '预览命名空间') : (config ? config.namespace : 'default');
+            document.getElementById('infoDeployment').textContent = config && config.deploymentName ? config.deploymentName : (mergeView ? (config.imageName + '-preview') : '未指定');
+
+            // 合并步骤 & 合并信息卡片显隐
+            const stepMergeWrap = document.getElementById('stepMergeWrap');
+            const mergeInfoCard = document.getElementById('mergeInfoCard');
+            stepMergeWrap.classList.toggle('hidden', !mergeView);
+            mergeInfoCard.classList.toggle('hidden', !mergeView);
+            if (mergeView) {
+                document.getElementById('infoBaseBranch').textContent = config.baseBranch || config.branch || 'main';
+                const fb = document.getElementById('infoFeatureBranches');
+                const feats = config.featureBranches || [];
+                fb.innerHTML = feats.length
+                    ? feats.map(b => `<span class="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-[10px] font-mono">${b}</span>`).join('')
+                    : '<span class="text-xs text-slate-400">—</span>';
+                document.getElementById('infoPreviewNs').textContent = config.previewNamespace || '—';
+                document.getElementById('infoMergeCommit').textContent = '—';
+                document.getElementById('previewUrlWrap').classList.add('hidden');
+                document.getElementById('conflictWrap').classList.add('hidden');
+            }
 
             // Reset steps
             resetStepper();
@@ -659,8 +989,44 @@
             // Connect SSE
             connectSSE(id);
 
+            // 拉取一次详细状态以填充合并信息
+            if (mergeView) refreshMergeInfo(id);
+
             // Scroll to top
             panel.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // 拉取流水线详细状态, 填充合并预览信息卡片
+        async function refreshMergeInfo(id) {
+            try {
+                const resp = await fetch('/devops/pipeline/' + id + '/status');
+                const data = await resp.json();
+                if (!data.success || !data.mergeDeploy) return;
+                if (data.mergeCommitSha) {
+                    document.getElementById('infoMergeCommit').textContent = data.mergeCommitSha;
+                }
+                if (data.previewNamespace) {
+                    document.getElementById('infoPreviewNs').textContent = data.previewNamespace;
+                }
+                const urlWrap = document.getElementById('previewUrlWrap');
+                if (data.previewNodePortUrl) {
+                    const a = document.getElementById('infoPreviewUrl');
+                    a.href = data.previewNodePortUrl;
+                    a.textContent = data.previewNodePortUrl;
+                    urlWrap.classList.remove('hidden');
+                }
+                const conflicts = data.conflictFiles || [];
+                const cw = document.getElementById('conflictWrap');
+                if (conflicts.length > 0) {
+                    document.getElementById('conflictFiles').innerHTML =
+                        conflicts.map(f => `<li>${f}</li>`).join('');
+                    cw.classList.remove('hidden');
+                } else {
+                    cw.classList.add('hidden');
+                }
+            } catch (e) {
+                console.error('refreshMergeInfo failed:', e);
+            }
         }
 
         // ========== SSE Connection ==========
@@ -694,6 +1060,7 @@
             es.addEventListener('status', function (e) {
                 const data = JSON.parse(e.data);
                 updateStatus(data);
+                if (mergeView) refreshMergeInfo(pipelineId);
             });
 
             // Complete
@@ -701,6 +1068,10 @@
                 es.close();
                 currentEventSource = null;
                 refreshPipelines();
+                if (mergeView) {
+                    refreshMergeInfo(pipelineId);
+                    refreshPreviews();
+                }
             });
 
             es.onerror = function () {
@@ -748,14 +1119,18 @@
         }
 
         // ========== Stepper ==========
-        const stepNames = ['代码克隆', '多阶段构建', '导入节点', 'K3s部署', '完成'];
+        // 6 步: 0 代码克隆 / 1 分支合并 / 2 多阶段构建 / 3 导入节点 / 4 K3s部署 / 5 完成
+        const stepNames = ['代码克隆', '分支合并', '多阶段构建', '导入节点', 'K3s部署', '完成'];
+        const MAX_STEP = 5;
 
         function resetStepper() {
-            for (let i = 0; i <= 4; i++) {
+            for (let i = 0; i <= MAX_STEP; i++) {
                 const el = document.getElementById('step' + i);
                 const labelEl = document.getElementById('step' + i + 'label');
                 if (!el || !labelEl) continue;
+                const icons = ['download', 'merge', 'build', 'download_for_offline', 'rocket_launch', 'check_circle'];
                 el.className = 'size-10 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center transition-all duration-300';
+                el.innerHTML = '<span class="material-symbols-outlined">' + icons[i] + '</span>';
                 labelEl.textContent = '等待中';
                 labelEl.className = 'text-[10px] text-slate-400';
             }
@@ -779,11 +1154,13 @@
                 document.getElementById('pipelineDuration').textContent = duration;
             }
 
-            // Update stepper (5 steps: 0-4)
-            for (let i = 0; i <= 4; i++) {
+            // Update stepper (6 steps: 0-5). 单分支模式跳过 step1 (分支合并)。
+            for (let i = 0; i <= MAX_STEP; i++) {
                 const el = document.getElementById('step' + i);
                 const labelEl = document.getElementById('step' + i + 'label');
                 if (!el || !labelEl) continue;
+                // 非合并模式下隐藏并跳过"分支合并"步骤
+                if (i === 1 && !mergeView) continue;
 
                 if (i < step) {
                     // Completed
@@ -812,8 +1189,8 @@
                 }
             }
 
-            // Update progress bar (5 steps → each 20%)
-            const progressPercent = Math.min(step * 20 + (finished ? 20 : 0), 100);
+            // Update progress bar (6 steps: step/5 * 100%)
+            const progressPercent = Math.min((step / MAX_STEP) * 100, 100);
             document.getElementById('stepperProgress').style.width = progressPercent + '%';
         }
 
@@ -849,14 +1226,82 @@
                     activatePipeline(id, {
                         gitUrl: data.gitUrl,
                         branch: data.branch,
+                        baseBranch: data.baseBranch,
                         imageName: data.imageName,
                         imageTag: '',
                         namespace: '',
-                        deploymentName: ''
+                        deploymentName: '',
+                        mergeDeploy: data.mergeDeploy,
+                        featureBranches: data.featureBranches || [],
+                        previewNamespace: data.previewNamespace
                     });
                 }
             } catch (e) {
                 console.error('Failed to view pipeline:', e);
+            }
+        }
+
+        // ========== 预览环境管理 ==========
+        async function refreshPreviews() {
+            try {
+                const resp = await fetch('/devops/previews');
+                const data = await resp.json();
+                const container = document.getElementById('previewList');
+                document.getElementById('previewCount').textContent = data.length + ' 个环境';
+                if (!data.length) {
+                    container.innerHTML = `
+                        <div class="p-8 text-center">
+                            <span class="material-symbols-outlined text-4xl text-slate-300 mb-2">cloud_off</span>
+                            <p class="text-slate-400 text-sm">暂无预览环境</p>
+                        </div>`;
+                    return;
+                }
+                container.innerHTML = data.map(p => {
+                    const feats = (p.featureBranches || '').split(',').filter(Boolean);
+                    const featChips = feats.map(b => `<span class="px-1.5 py-0.5 bg-primary/10 text-primary rounded text-[10px] font-mono">${b}</span>`).join(' ');
+                    const ttlRemain = p.ttlRemainingMinutes;
+                    const ttlText = ttlRemain >= 0 ? (ttlRemain + ' 分钟后回收') : 'TTL 未知';
+                    const urlPart = p.url
+                        ? `<a href="${p.url}" target="_blank" class="text-xs font-mono text-primary hover:underline break-all">${p.url}</a>`
+                        : '<span class="text-xs text-slate-400">无 NodePort</span>';
+                    return `
+                        <div class="px-6 py-4 border-b border-slate-50 flex items-center justify-between gap-4">
+                            <div class="min-w-0 flex-1">
+                                <p class="text-sm font-semibold text-slate-900 font-mono">${p.namespace}</p>
+                                <div class="flex items-center flex-wrap gap-1.5 mt-1">
+                                    <span class="text-[10px] text-slate-400">base:</span>
+                                    <span class="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-[10px] font-mono">${p.baseBranch || '—'}</span>
+                                    ${featChips}
+                                </div>
+                                <div class="mt-1">${urlPart}</div>
+                            </div>
+                            <div class="flex flex-col items-end gap-2 shrink-0">
+                                <span class="text-[11px] text-slate-400">${ttlText}</span>
+                                <button onclick="destroyPreview('${p.namespace}')"
+                                    class="px-2.5 py-1 text-xs font-medium text-danger border border-danger/30 rounded-lg hover:bg-danger/5 transition-colors flex items-center gap-1">
+                                    <span class="material-symbols-outlined text-sm">delete</span>
+                                    销毁
+                                </button>
+                            </div>
+                        </div>`;
+                }).join('');
+            } catch (e) {
+                console.error('Failed to refresh previews:', e);
+            }
+        }
+
+        async function destroyPreview(nsId) {
+            if (!confirm('确定销毁预览环境 ' + nsId + ' 吗？该命名空间下所有资源将被删除。')) return;
+            try {
+                const resp = await fetch('/devops/previews/' + encodeURIComponent(nsId), { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.success) {
+                    refreshPreviews();
+                } else {
+                    alert('销毁失败: ' + (data.error || '未知错误'));
+                }
+            } catch (e) {
+                alert('请求失败: ' + e.message);
             }
         }
 
@@ -925,6 +1370,9 @@
                 // Duration is updated via SSE, no need for polling
             }
         }, 1000);
+
+        // ========== 初始化 ==========
+        refreshPreviews();
     </script>
 </body>
 

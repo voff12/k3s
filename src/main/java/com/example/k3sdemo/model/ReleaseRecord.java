@@ -42,6 +42,12 @@ public class ReleaseRecord {
     private volatile String errorMessage;
     private volatile LocalDateTime lastActivityTime;
 
+    // ===== 多分支合并预览部署的可观测字段 =====
+    private volatile String mergeCommitSha;
+    private final List<String> conflictFiles = Collections.synchronizedList(new ArrayList<>());
+    private volatile String previewNamespace;
+    private volatile String previewNodePortUrl;
+
     private static final ZoneId BEIJING = ZoneId.of("Asia/Shanghai");
 
     public ReleaseRecord(ReleaseConfig config) {
@@ -142,5 +148,45 @@ public class ReleaseRecord {
 
     public String getStartTimeFormatted() {
         return startTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+
+    // ===== 多分支合并预览部署 =====
+
+    public boolean isMergeDeploy() {
+        return config != null && config.isMergeDeploy();
+    }
+
+    public String getMergeCommitSha() {
+        return mergeCommitSha;
+    }
+
+    public void setMergeCommitSha(String mergeCommitSha) {
+        this.mergeCommitSha = mergeCommitSha;
+    }
+
+    public List<String> getConflictFiles() {
+        return conflictFiles;
+    }
+
+    public void addConflictFile(String file) {
+        if (file != null && !file.trim().isEmpty()) {
+            conflictFiles.add(file.trim());
+        }
+    }
+
+    public String getPreviewNamespace() {
+        return previewNamespace;
+    }
+
+    public void setPreviewNamespace(String previewNamespace) {
+        this.previewNamespace = previewNamespace;
+    }
+
+    public String getPreviewNodePortUrl() {
+        return previewNodePortUrl;
+    }
+
+    public void setPreviewNodePortUrl(String previewNodePortUrl) {
+        this.previewNodePortUrl = previewNodePortUrl;
     }
 }

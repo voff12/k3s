@@ -21,6 +21,16 @@
     </properties>
     <dependencyManagement>
         <dependencies>
+            <!-- 对齐所有 fabric8 kubernetes 工件到同一版本, 避免 Spring Boot BOM 把
+                 kubernetes-client-api/model 管成 6.9.2 而 client 为 6.10.0 导致的
+                 NoClassDefFoundError: V1FlowControlAPIGroupDSL -->
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-client-bom</artifactId>
+                <version>${fabric8.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.cloud</groupId>
                 <artifactId>spring-cloud-dependencies</artifactId>
@@ -79,6 +89,13 @@
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-bootstrap</artifactId>
+        </dependency>
+        <!-- JGit: pure-Java git, used for listing remote branches (git ls-remote)
+             without requiring a git binary in the runtime image -->
+        <dependency>
+            <groupId>org.eclipse.jgit</groupId>
+            <artifactId>org.eclipse.jgit</artifactId>
+            <version>6.7.0.202309050840-r</version>
         </dependency>
     </dependencies>
 

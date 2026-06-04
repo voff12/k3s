@@ -85,6 +85,9 @@ spec:
                 -XX:MaxRAMPercentage=75.0
                 -XX:InitialRAMPercentage=50.0
                 -Djava.security.egd=file:/dev/./urandom
+            # 集群内启用 Nacos 配置中心（bootstrap 默认 false，本地不连；此处显式开启）
+            - name: NACOS_ENABLED
+              value: "true"
             # Nacos 配置中心地址（与 nacos-svc Service 名称对应）
             - name: NACOS_SERVER_ADDR
               value: "nacos-svc.default.svc.cluster.local:8848"

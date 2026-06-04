@@ -68,6 +68,9 @@ public class ReleaseService {
     @Value("${release.base-image:}")
     private String releaseBaseImage;
 
+    @Value("${pip.index:https://pypi.tuna.tsinghua.edu.cn/simple}")
+    private String pipIndexUrl;
+
     private final Map<String, ReleaseRecord> releases = new ConcurrentHashMap<>();
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
@@ -97,7 +100,14 @@ public class ReleaseService {
         String fullImage = config.getFullHarborImageRef(harborHost);
         record.addLog("[INFO] 发布任务已创建, ID: " + record.getId());
         record.addLog("[INFO] Git 仓库: " + config.getGitUrl());
-        record.addLog("[INFO] 分支: " + config.getBranch());
+        if (config.isMergeDeploy()) {
+            record.addLog("[INFO] 模式: 多分支合并预览部署");
+            record.addLog("[INFO] 基底分支(base): " + config.getEffectiveBaseBranch());
+            record.addLog("[INFO] 待合并分支: " + String.join(", ", config.getNormalizedFeatureBranches()));
+            record.addLog("[INFO] 预览命名空间: " + config.getPreviewNamespace());
+        } else {
+            record.addLog("[INFO] 分支: " + config.getBranch());
+        }
         record.addLog("[INFO] 目标镜像: " + fullImage);
         record.addLog("[INFO] Harbor 项目: " + config.getHarborProject());
         if (config.hasGitAuth()) {
@@ -132,10 +142,13 @@ public class ReleaseService {
 
         try (KubernetesClient client = new KubernetesClientBuilder().build()) {
 
-            // ========== Step 1: 构建发布 (Clone + Maven + Kaniko → Harbor) ==========
+            // ========== Step 1: 构建发布 (Clone + 构建 + Kaniko → Harbor) ==========
             record.advanceTo(ReleaseRecord.Status.BUILDING);
             broadcastStatus(record);
-            record.addLog("[INFO] ➜ 步骤 1/2: 构建发布 (克隆 → Maven → Kaniko → Harbor)...");
+            String rt = config.resolveRuntime();
+            String buildChain = config.isPython() ? "克隆 → pip 镜像构建 → Harbor"
+                    : ("java".equals(rt) ? "克隆 → Maven → Kaniko → Harbor" : "克隆 → 构建 → Kaniko → Harbor");
+            record.addLog("[INFO] ➜ 步骤 1/2: 构建发布 (" + buildChain + ") | 运行时: " + rt);
             broadcastLog(record);
 
             Job releaseJob = buildReleaseJob(jobName, record.getId(), config, fullImage);
@@ -167,15 +180,31 @@ public class ReleaseService {
             record.addLog("[INFO] Pod 已创建: " + podName);
             broadcastLog(record);
 
-            // 1a: build 容器 (Git Clone + Maven + Dockerfile + Docker Config)
+            // 1a: build 容器 (Git Clone [+ Merge] + Maven + Dockerfile + Docker Config)
             boolean buildOk = waitForInitContainerAndStreamLogs(client, podName, "build", record);
             if (!buildOk) {
-                record.fail("构建失败，请查看日志");
+                if (config.isMergeDeploy()) {
+                    parseMergeResults(record);
+                    if (!record.getConflictFiles().isEmpty()) {
+                        record.fail("分支合并冲突，冲突文件: " + String.join(", ", record.getConflictFiles())
+                                + " — 请人工解决后重试");
+                    } else {
+                        record.fail("分支合并/构建失败，请查看日志");
+                    }
+                } else {
+                    record.fail("构建失败，请查看日志");
+                }
                 broadcastStatus(record);
                 cleanupJob(client, jobName);
                 return;
             }
-            record.addLog("[INFO] ✓ 代码克隆 + Maven 构建完成, 开始 Kaniko 构建...");
+            if (config.isMergeDeploy()) {
+                parseMergeResults(record);
+                record.addLog("[INFO] ✓ 多分支合并 + 准备完成, 开始 Kaniko 构建..."
+                        + (record.getMergeCommitSha() != null ? " (merge commit: " + record.getMergeCommitSha() + ")" : ""));
+            } else {
+                record.addLog("[INFO] ✓ 代码克隆 + 准备完成, 开始 Kaniko 构建...");
+            }
             broadcastLog(record);
 
             // 1b: Kaniko 构建镜像并推送到 Harbor
@@ -205,8 +234,13 @@ public class ReleaseService {
 
             // 现在 Deployment 名称总是会被设置（自动或手动）
             if (jobSuccess) {
-                // Also do server-side deployment update as a fallback
-                deployToK3s(client, config, fullImage, record);
+                if (config.isMergeDeploy()) {
+                    // 合并模式: 部署到独立预览命名空间 preview-<mergeSetId>
+                    deployToPreview(client, config, fullImage, record);
+                } else {
+                    // Also do server-side deployment update as a fallback
+                    deployToK3s(client, config, fullImage, record);
+                }
             } else {
                 diagnoseMainContainerFailure(client, jobName, record);
                 record.fail("部署容器执行失败");
@@ -229,6 +263,65 @@ public class ReleaseService {
         } finally {
             completeEmitters(record.getId());
         }
+    }
+
+    // ==================== Dockerfile 生成辅助 ====================
+
+    /** 标准 .dockerignore(Python 镜像精简)。 */
+    private static final String PY_DOCKERIGNORE =
+            ".git\n__pycache__/\n*.pyc\n*.pyo\n.venv/\nvenv/\n.pytest_cache/\n.env\n";
+
+    private static String b64(String s) {
+        return Base64.getEncoder().encodeToString(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static String jsonEscape(String s) {
+        return s.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    /** Java runtime-only Dockerfile.release(COPY 已编译 jar)。 */
+    private String buildJavaJarDockerfile(String baseImage) {
+        return "FROM " + baseImage + "\n"
+                + "WORKDIR /app\n"
+                + "COPY target/*.jar app.jar\n"
+                + "EXPOSE 8080\n"
+                + "ENV JAVA_OPTS=\"-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0\"\n"
+                + "ENTRYPOINT [\"sh\", \"-c\", \"java $JAVA_OPTS -jar /app/app.jar\"]\n";
+    }
+
+    /** Python 单阶段 Dockerfile(pip install + gunicorn/uvicorn),见 PYTHON-RELEASE-DESIGN.md 第五节。 */
+    private String buildPythonDockerfile(String fromPrefix, ReleaseConfig config) {
+        int port = config.getEffectiveAppPort();
+        String pyver = (config.getPythonVersion() != null && !config.getPythonVersion().isEmpty())
+                ? config.getPythonVersion() : "3.11";
+        String server = "uvicorn".equals(config.getPythonServer()) ? "uvicorn" : "gunicorn";
+        String module = (config.getAppModule() != null && !config.getAppModule().isEmpty())
+                ? config.getAppModule() : "app:app";
+        String rp = (config.getRequirementsPath() != null && !config.getRequirementsPath().isEmpty())
+                ? config.getRequirementsPath() : "requirements.txt";
+        StringBuilder df = new StringBuilder();
+        df.append("FROM ").append(fromPrefix).append("/library/python:").append(pyver).append("-slim\n");
+        df.append("WORKDIR /app\n");
+        if (config.isBuildDeps()) {
+            df.append("RUN apt-get update && apt-get install -y --no-install-recommends build-essential gcc"
+                    + " && rm -rf /var/lib/apt/lists/*\n");
+        }
+        df.append("COPY ").append(rp).append(" ./requirements.txt\n");
+        df.append("RUN pip install --no-cache-dir -i ").append(pipIndexUrl).append(" -r requirements.txt\n");
+        df.append("RUN pip install --no-cache-dir -i ").append(pipIndexUrl).append(" ").append(server).append("\n");
+        df.append("COPY . .\n");
+        df.append("EXPOSE ").append(port).append("\n");
+        String sc = config.getStartCommand();
+        if (sc != null && !sc.trim().isEmpty()) {
+            df.append("CMD [\"sh\", \"-c\", \"").append(jsonEscape(sc.trim())).append("\"]\n");
+        } else if ("uvicorn".equals(server)) {
+            df.append("CMD [\"uvicorn\", \"").append(module)
+                    .append("\", \"--host\", \"0.0.0.0\", \"--port\", \"").append(port).append("\"]\n");
+        } else {
+            df.append("CMD [\"gunicorn\", \"-b\", \"0.0.0.0:").append(port).append("\", \"")
+                    .append(module).append("\"]\n");
+        }
+        return df.toString();
     }
 
     // ==================== 构建 K8s Job ====================
@@ -260,7 +353,12 @@ public class ReleaseService {
         // 注意：动态获取容器名，兼容 hello / hello-container 等不同命名
         String deployName = config.getDeploymentName();
         String ns = config.getNamespace();
-        String deployCmd = String.format(
+        String deployCmd;
+        if (config.isMergeDeploy()) {
+            // 合并模式: 预览环境由服务端部署到 preview-<id> 命名空间, 此处不在 default 部署
+            deployCmd = "echo '[INFO] 合并预览模式: 镜像已推送 Harbor, 预览环境将由服务端部署到独立命名空间'";
+        } else {
+            deployCmd = String.format(
                 "echo '[INFO] 开始部署到 K3s (Deployment: %s)...' && " +
                         "if kubectl get deployment %s -n %s >/dev/null 2>&1; then " +
                         "  echo '[INFO] Deployment 已存在，更新镜像...' && " +
@@ -275,6 +373,7 @@ public class ReleaseService {
                 deployName, deployName, ns,
                 deployName, ns, deployName, fullImage, ns,
                 deployName, ns);
+        }
 
         // 构建 Harbor docker config for Kaniko authentication
         // Kaniko 需要 base64 编码的 auth 字段: base64(username:password)
@@ -305,27 +404,78 @@ public class ReleaseService {
             buildCmdBuilder.append("git config --global http.proxy ").append(effectiveProxy).append(" && ");
             buildCmdBuilder.append("git config --global https.proxy ").append(effectiveProxy).append(" && ");
         }
-        // 克隆代码
-        buildCmdBuilder.append("git clone --depth 1 --branch ").append(config.getBranch())
-                .append(" ").append(cloneUrl).append(" /workspace && ");
-        buildCmdBuilder.append("echo '[INFO] ✓ 代码克隆完成' && ");
-        // Maven 构建
-        buildCmdBuilder.append("cd /workspace && ").append(buildCmd).append(" && ");
-        buildCmdBuilder.append("echo '[INFO] ✓ Maven 构建完成' && ");
-        buildCmdBuilder.append("ls -la /workspace/target/*.jar 2>/dev/null && ");
-        // 生成 Dockerfile.release
-        buildCmdBuilder.append(String.format(
-                "printf 'FROM %s\\nWORKDIR /app\\nCOPY target/*.jar app.jar\\nEXPOSE 8080\\n"
-                        + "ENV JAVA_OPTS=\"-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0\"\\n"
-                        + "ENTRYPOINT [\"sh\", \"-c\", \"java $JAVA_OPTS -jar /app/app.jar\"]\\n' "
-                        + "> /workspace/Dockerfile.release && ",
-                baseImage));
-        buildCmdBuilder.append("echo '[INFO] ✓ Dockerfile.release 已生成 (base: ").append(baseImage).append(")' && ");
-        // 写入 Harbor Docker Config (使用 base64 编码避免 shell 转义问题)
+        // 克隆代码 (合并模式: clone base + 逐个 merge feature, 冲突即中止)
+        if (config.isMergeDeploy()) {
+            String base = config.getEffectiveBaseBranch();
+            buildCmdBuilder.append("git clone --branch ").append(base)
+                    .append(" ").append(cloneUrl).append(" /workspace && cd /workspace && ");
+            buildCmdBuilder.append("git config user.email 'ci@k3s-demo.local' && ");
+            buildCmdBuilder.append("git config user.name 'k3s-demo-ci' && ");
+            buildCmdBuilder.append("echo '[MERGE] 基底分支(base): ").append(base).append("' && ");
+            for (String feat : config.getNormalizedFeatureBranches()) {
+                buildCmdBuilder.append("echo '[MERGE] ➜ 合并分支: ").append(feat).append("' && ");
+                buildCmdBuilder.append("git fetch origin ").append(feat).append(" && ");
+                buildCmdBuilder.append(String.format(
+                        "{ git merge --no-ff --no-edit -m 'ci: merge %s into %s' FETCH_HEAD || "
+                                + "{ echo '[CONFLICT] 分支 %s 与当前集成分支存在合并冲突, 冲突文件如下:'; "
+                                + "git diff --name-only --diff-filter=U; git merge --abort; exit 1; }; } && ",
+                        feat, base, feat));
+                buildCmdBuilder.append("echo '[MERGE] ✓ 已合并: ").append(feat).append("' && ");
+            }
+            buildCmdBuilder.append("echo \"[MERGE] MERGE_COMMIT=$(git rev-parse HEAD)\" && ");
+            buildCmdBuilder.append("echo '[INFO] ✓ 多分支合并完成' && ");
+        } else {
+            buildCmdBuilder.append("git clone --depth 1 --branch ").append(config.getBranch())
+                    .append(" ").append(cloneUrl).append(" /workspace && ");
+            buildCmdBuilder.append("echo '[INFO] ✓ 代码克隆完成' && ");
+        }
+        // ===== runtime 感知: 始终产出 /workspace/Dockerfile.release + 写 Harbor 认证 =====
+        // 优先级: 仓库自带 Dockerfile → cp + 重写 FROM;否则按 runtime(python 免编译 / java 跑 mvn)
+        String runtime = config.resolveRuntime();
+        String reqPath = (config.getRequirementsPath() != null && !config.getRequirementsPath().isEmpty())
+                ? config.getRequirementsPath() : "requirements.txt";
+        String dfUserPath = config.getDockerfilePath() != null ? config.getDockerfilePath() : "./Dockerfile";
+        String dfUserFile = dfUserPath.startsWith("./") ? dfUserPath.substring(2) : dfUserPath;
         String dockerConfigBase64 = Base64.getEncoder().encodeToString(dockerConfigJson.getBytes());
-        buildCmdBuilder.append("mkdir -p /docker-config && ");
-        buildCmdBuilder.append("echo '").append(dockerConfigBase64).append("' | base64 -d > /docker-config/config.json && ");
-        buildCmdBuilder.append("echo '[INFO] ✓ Harbor 认证已写入'");
+        String pyDfRelB64 = b64(buildPythonDockerfile(harborHost, config));
+        String javaJarDfB64 = b64(buildJavaJarDockerfile(baseImage));
+        String dockerIgnoreB64 = b64(PY_DOCKERIGNORE);
+
+        buildCmdBuilder.append("cd /workspace && ");
+        // 写 Harbor 认证(kaniko 推送用),始终执行 — Python/dockerfile 模式 build 容器不跑 mvn, 但此步必须保留
+        buildCmdBuilder.append("mkdir -p /docker-config && echo '").append(dockerConfigBase64)
+                .append("' | base64 -d > /docker-config/config.json && echo '[INFO] ✓ Harbor 认证已写入' && ");
+        buildCmdBuilder.append("RUNTIME='").append(runtime).append("' && REQ_PATH='").append(reqPath)
+                .append("' && DFUSER='/workspace/").append(dfUserFile).append("' && ");
+        buildCmdBuilder.append("if [ -f \"$DFUSER\" ]; then ");
+        buildCmdBuilder.append("  echo '[INFO] 检测到仓库自带 Dockerfile, 优先使用 (重写 FROM 到 Harbor)' && ");
+        buildCmdBuilder.append("  cp \"$DFUSER\" /workspace/Dockerfile.release && ");
+        buildCmdBuilder.append("  sed -i 's|^FROM docker\\.io/|FROM ").append(harborHost)
+                .append("/|; s|^FROM library/|FROM ").append(harborHost).append("/library/|' /workspace/Dockerfile.release && ");
+        buildCmdBuilder.append("  sed -i '/^FROM [^/]*$/s|^FROM |FROM ").append(harborHost)
+                .append("/library/|' /workspace/Dockerfile.release && ");
+        buildCmdBuilder.append("  echo '[INFO] Dockerfile.release:' && cat /workspace/Dockerfile.release; ");
+        buildCmdBuilder.append("else ");
+        buildCmdBuilder.append("  if [ \"$RUNTIME\" = 'auto' ] || [ -z \"$RUNTIME\" ]; then ");
+        buildCmdBuilder.append("    if [ -f \"/workspace/$REQ_PATH\" ] || [ -f /workspace/requirements.txt ]; then RUNTIME=python; ");
+        buildCmdBuilder.append("    elif [ -f /workspace/pom.xml ] || [ -f /workspace/build.gradle ]; then RUNTIME=java; ");
+        buildCmdBuilder.append("    elif [ -f /workspace/pyproject.toml ] || [ -f /workspace/Pipfile ]; then echo '[ERROR] 检测到 pyproject/Pipfile 但缺少 requirements.txt; 本期未支持 Poetry/Pipenv, 请先 poetry export -f requirements.txt -o requirements.txt 或自带 Dockerfile' && exit 1; ");
+        buildCmdBuilder.append("    else echo '[ERROR] 无法识别项目类型, 请显式指定 runtime(java/python) 或自带 Dockerfile' && exit 1; fi; ");
+        buildCmdBuilder.append("  fi; ");
+        buildCmdBuilder.append("  if [ \"$RUNTIME\" = 'dockerfile' ]; then echo '[ERROR] runtime=dockerfile 但仓库未发现 Dockerfile' && exit 1; fi; ");
+        buildCmdBuilder.append("  echo \"[INFO] 构建运行时: $RUNTIME\" && ");
+        buildCmdBuilder.append("  if [ \"$RUNTIME\" = 'python' ]; then ");
+        buildCmdBuilder.append("    if [ ! -f \"/workspace/$REQ_PATH\" ]; then echo '# auto-created empty requirements' > \"/workspace/$REQ_PATH\" && echo \"[INFO] 未发现 $REQ_PATH, 使用空依赖清单\"; fi && ");
+        buildCmdBuilder.append("    echo '").append(pyDfRelB64).append("' | base64 -d > /workspace/Dockerfile.release && ");
+        buildCmdBuilder.append("    echo '").append(dockerIgnoreB64).append("' | base64 -d > /workspace/.dockerignore && ");
+        buildCmdBuilder.append("    echo '[INFO] ✓ 已生成 Python Dockerfile.release:' && cat /workspace/Dockerfile.release; ");
+        buildCmdBuilder.append("  else ");
+        buildCmdBuilder.append("    echo '[INFO] Java: 执行 Maven 打包...' && ").append(buildCmd)
+                .append(" && echo '[INFO] ✓ Maven 构建完成' && ls -la /workspace/target/*.jar 2>/dev/null && ");
+        buildCmdBuilder.append("    echo '").append(javaJarDfB64).append("' | base64 -d > /workspace/Dockerfile.release && ");
+        buildCmdBuilder.append("    echo '[INFO] ✓ 已生成 Java Dockerfile.release:' && cat /workspace/Dockerfile.release; ");
+        buildCmdBuilder.append("  fi; ");
+        buildCmdBuilder.append("fi");
 
         return new JobBuilder()
                 .withNewMetadata()
@@ -727,7 +877,8 @@ public class ReleaseService {
     /**
      * 确保 Service 存在，用于暴露 Deployment 供访问（NodePort）。
      */
-    private void ensureService(KubernetesClient client, String namespace, String deployName, ReleaseRecord record) {
+    private void ensureService(KubernetesClient client, String namespace, String deployName, int appPort,
+            ReleaseRecord record) {
         String svcName = deployName;
         try {
             io.fabric8.kubernetes.api.model.Service existing = client.services().inNamespace(namespace).withName(svcName).get();
@@ -744,8 +895,8 @@ public class ReleaseService {
                         .addNewPort()
                         .withName("http")
                         .withProtocol("TCP")
-                        .withPort(8080)
-                        .withNewTargetPort(8080)
+                        .withPort(appPort)
+                        .withNewTargetPort(appPort)
                         .endPort()
                         .endSpec()
                         .build();
@@ -835,7 +986,7 @@ public class ReleaseService {
                         .withImage(fullImage)
                         .withImagePullPolicy("Always")
                         .addNewPort()
-                        .withContainerPort(8080)
+                        .withContainerPort(config.getEffectiveAppPort())
                         .withName("http")
                         .withProtocol("TCP")
                         .endPort()
@@ -854,7 +1005,7 @@ public class ReleaseService {
                 client.apps().deployments().inNamespace(ns).resource(deployment).create();
                 record.addLog("[INFO] ✓ Deployment 已创建: " + deployName + " (镜像: " + fullImage + ")");
                 broadcastLog(record);
-                ensureService(client, ns, deployName, record);
+                ensureService(client, ns, deployName, config.getEffectiveAppPort(), record);
                 return;
             }
 
@@ -876,7 +1027,7 @@ public class ReleaseService {
             client.apps().deployments().inNamespace(ns).resource(deployment).update();
             record.addLog("[INFO] ✓ Deployment 已更新: " + deployName + " → " + fullImage);
 
-            ensureService(client, ns, deployName, record);
+            ensureService(client, ns, deployName, config.getEffectiveAppPort(), record);
 
             record.addLog("[INFO] 等待滚动更新...");
             broadcastLog(record);
@@ -894,6 +1045,221 @@ public class ReleaseService {
             record.addLog("[ERROR] 部署更新失败: " + e.getMessage());
             broadcastLog(record);
         }
+    }
+
+    /**
+     * 合并预览部署 (Harbor 模式): 把推送到 Harbor 的镜像部署到独立预览命名空间 preview-&lt;mergeSetId&gt;。
+     * 在预览命名空间内创建 Harbor 拉取 Secret + Deployment(imagePullSecrets) + NodePort Service。
+     */
+    private void deployToPreview(KubernetesClient client, ReleaseConfig config, String fullImage,
+            ReleaseRecord record) {
+        try {
+            String previewNs = config.getPreviewNamespace();
+            record.setPreviewNamespace(previewNs);
+            String appName = sanitizeName(config.getImageName()) + "-preview";
+            int appPort = config.getEffectiveAppPort();
+            long nowMs = System.currentTimeMillis();
+
+            // 1. 幂等创建预览命名空间
+            Namespace existingNs = client.namespaces().withName(previewNs).get();
+            if (existingNs == null) {
+                Namespace ns = new NamespaceBuilder()
+                        .withNewMetadata()
+                        .withName(previewNs)
+                        .addToLabels("managed-by", "k3s-demo-devops")
+                        .addToLabels("preview-env", "true")
+                        .addToLabels("merge-set-id", config.getMergeSetId())
+                        .addToAnnotations("k3s-demo/created-at", String.valueOf(nowMs))
+                        .addToAnnotations("k3s-demo/ttl-minutes", String.valueOf(config.getPreviewTtlMinutes()))
+                        .addToAnnotations("k3s-demo/base-branch", config.getEffectiveBaseBranch())
+                        .addToAnnotations("k3s-demo/feature-branches",
+                                String.join(",", config.getNormalizedFeatureBranches()))
+                        .endMetadata()
+                        .build();
+                client.namespaces().resource(ns).create();
+                record.addLog("[INFO] ✓ 已创建预览命名空间: " + previewNs);
+            } else {
+                record.addLog("[INFO] 复用已存在的预览命名空间: " + previewNs + " (续期 TTL)");
+                try {
+                    client.namespaces().withName(previewNs).edit(n -> new NamespaceBuilder(n)
+                            .editMetadata()
+                            .addToAnnotations("k3s-demo/created-at", String.valueOf(nowMs))
+                            .endMetadata().build());
+                } catch (Exception ignore) {
+                }
+            }
+            broadcastLog(record);
+
+            // 2. 预览命名空间内创建 Harbor 拉取 Secret
+            ensureHarborSecret(client, previewNs, record);
+
+            // 3. 创建/更新 Deployment (从 Harbor 拉取, imagePullSecrets)
+            Deployment existing = client.apps().deployments().inNamespace(previewNs).withName(appName).get();
+            if (existing == null) {
+                Deployment desired = new DeploymentBuilder()
+                        .withNewMetadata()
+                        .withName(appName)
+                        .withNamespace(previewNs)
+                        .addToLabels("app", appName)
+                        .addToLabels("preview-env", "true")
+                        .endMetadata()
+                        .withNewSpec()
+                        .withReplicas(1)
+                        .withNewSelector().addToMatchLabels("app", appName).endSelector()
+                        .withNewTemplate()
+                        .withNewMetadata().addToLabels("app", appName).endMetadata()
+                        .withNewSpec()
+                        .addNewImagePullSecret("harbor-registry-secret")
+                        .addNewContainer()
+                        .withName("app")
+                        .withImage(fullImage)
+                        .withImagePullPolicy("Always")
+                        .addNewPort().withContainerPort(appPort).endPort()
+                        .endContainer()
+                        .endSpec()
+                        .endTemplate()
+                        .endSpec()
+                        .build();
+                client.apps().deployments().inNamespace(previewNs).resource(desired).create();
+                record.addLog("[INFO] ✓ 已创建预览 Deployment: " + appName);
+            } else {
+                var container = existing.getSpec().getTemplate().getSpec().getContainers().get(0);
+                container.setImage(fullImage);
+                container.setImagePullPolicy("Always");
+                client.apps().deployments().inNamespace(previewNs).resource(existing).update();
+                record.addLog("[INFO] ✓ 已更新预览 Deployment: " + appName + " -> " + fullImage);
+            }
+            broadcastLog(record);
+
+            // 4. 创建/更新 NodePort Service (自动分配端口)
+            io.fabric8.kubernetes.api.model.Service existingSvc = client.services().inNamespace(previewNs)
+                    .withName(appName).get();
+            if (existingSvc == null) {
+                io.fabric8.kubernetes.api.model.Service svc = new io.fabric8.kubernetes.api.model.ServiceBuilder()
+                        .withNewMetadata()
+                        .withName(appName)
+                        .withNamespace(previewNs)
+                        .addToLabels("app", appName)
+                        .addToLabels("preview-env", "true")
+                        .endMetadata()
+                        .withNewSpec()
+                        .withType("NodePort")
+                        .addToSelector("app", appName)
+                        .addNewPort()
+                        .withName("http")
+                        .withProtocol("TCP")
+                        .withPort(appPort)
+                        .withNewTargetPort(appPort)
+                        .endPort()
+                        .endSpec()
+                        .build();
+                client.services().inNamespace(previewNs).resource(svc).create();
+                record.addLog("[INFO] ✓ 已创建预览 Service (NodePort 自动分配): " + appName);
+            } else {
+                record.addLog("[INFO] 复用预览 Service: " + appName);
+            }
+            broadcastLog(record);
+
+            // 5. 回填访问地址
+            io.fabric8.kubernetes.api.model.Service svc = client.services().inNamespace(previewNs)
+                    .withName(appName).get();
+            Integer nodePort = null;
+            if (svc != null && svc.getSpec() != null && svc.getSpec().getPorts() != null
+                    && !svc.getSpec().getPorts().isEmpty()) {
+                nodePort = svc.getSpec().getPorts().get(0).getNodePort();
+            }
+            String nodeIp = getFirstNodeIp(client);
+            if (nodePort != null && nodeIp != null) {
+                String url = "http://" + nodeIp + ":" + nodePort;
+                record.setPreviewNodePortUrl(url);
+                record.addLog("[INFO] ✓ 预览环境访问地址: " + url);
+            } else if (nodePort != null) {
+                record.setPreviewNodePortUrl("http://<节点IP>:" + nodePort);
+                record.addLog("[INFO] ✓ 预览环境 NodePort: " + nodePort);
+            }
+            broadcastLog(record);
+
+            Thread.sleep(3000);
+            Deployment updated = client.apps().deployments().inNamespace(previewNs).withName(appName).get();
+            if (updated != null && updated.getStatus() != null) {
+                int desiredR = updated.getSpec().getReplicas() != null ? updated.getSpec().getReplicas() : 1;
+                int ready = updated.getStatus().getReadyReplicas() != null ? updated.getStatus().getReadyReplicas() : 0;
+                record.addLog("[INFO] 预览副本状态: " + ready + "/" + desiredR + " Ready");
+            }
+            broadcastLog(record);
+        } catch (Exception e) {
+            record.addLog("[ERROR] 预览环境部署失败: " + e.getMessage());
+            broadcastLog(record);
+        }
+    }
+
+    /**
+     * 从日志中解析合并结果: merge commit sha 与冲突文件列表。
+     */
+    private void parseMergeResults(ReleaseRecord record) {
+        boolean inConflict = false;
+        for (String raw : new ArrayList<>(record.getLogs())) {
+            String content = raw;
+            if (content.startsWith("[") && content.length() > 11 && content.charAt(9) == ']') {
+                content = content.substring(11);
+            }
+            content = content.trim();
+            if (content.startsWith("[MERGE] MERGE_COMMIT=")) {
+                String sha = content.substring("[MERGE] MERGE_COMMIT=".length()).trim();
+                if (!sha.isEmpty() && !sha.startsWith("$")) {
+                    record.setMergeCommitSha(sha.length() > 12 ? sha.substring(0, 12) : sha);
+                }
+                inConflict = false;
+            } else if (content.contains("[CONFLICT]")) {
+                inConflict = true;
+            } else if (inConflict) {
+                if (content.isEmpty() || content.startsWith("[") || content.startsWith("===")
+                        || content.startsWith("CONFLICT")) {
+                    inConflict = false;
+                } else if (!record.getConflictFiles().contains(content)) {
+                    record.addConflictFile(content);
+                }
+            }
+        }
+    }
+
+    private String sanitizeName(String raw) {
+        if (raw == null) {
+            return "app";
+        }
+        String s = raw.toLowerCase()
+                .replaceAll("[^a-z0-9-]", "-")
+                .replaceAll("-+", "-")
+                .replaceAll("^-|-$", "");
+        return s.isEmpty() ? "app" : s;
+    }
+
+    private String getFirstNodeIp(KubernetesClient client) {
+        try {
+            var nodes = client.nodes().list().getItems();
+            for (var node : nodes) {
+                if (node.getStatus() != null && node.getStatus().getAddresses() != null) {
+                    String external = null;
+                    String internal = null;
+                    for (var addr : node.getStatus().getAddresses()) {
+                        if ("ExternalIP".equals(addr.getType())) {
+                            external = addr.getAddress();
+                        }
+                        if ("InternalIP".equals(addr.getType())) {
+                            internal = addr.getAddress();
+                        }
+                    }
+                    if (external != null) {
+                        return external;
+                    }
+                    if (internal != null) {
+                        return internal;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     private String getPodWaitingReason(Pod pod) {

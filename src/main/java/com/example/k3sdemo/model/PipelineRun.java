@@ -16,6 +16,7 @@ public class PipelineRun {
     public enum Status {
         PENDING("等待中"),
         CLONING("代码克隆"),
+        MERGING("分支合并"),
         BUILDING("多阶段构建"),
         PUSHING("导入节点"),
         DEPLOYING("K3s部署"),
@@ -42,6 +43,12 @@ public class PipelineRun {
     private final List<String> logs;
     private volatile String errorMessage;
     private volatile LocalDateTime lastActivityTime;
+
+    // ===== 多分支合并预览部署的可观测字段 =====
+    private volatile String mergeCommitSha;
+    private final List<String> conflictFiles = Collections.synchronizedList(new ArrayList<>());
+    private volatile String previewNamespace;
+    private volatile String previewNodePortUrl;
 
     private static final ZoneId BEIJING = ZoneId.of("Asia/Shanghai");
 
@@ -80,11 +87,12 @@ public class PipelineRun {
         this.lastActivityTime = LocalDateTime.now(BEIJING);
         switch (newStatus) {
             case CLONING -> currentStep = 0;
-            case BUILDING -> currentStep = 1;
-            case PUSHING -> currentStep = 2;
-            case DEPLOYING -> currentStep = 3;
+            case MERGING -> currentStep = 1;
+            case BUILDING -> currentStep = 2;
+            case PUSHING -> currentStep = 3;
+            case DEPLOYING -> currentStep = 4;
             case SUCCESS, FAILED -> {
-                currentStep = 4;
+                currentStep = 5;
                 endTime = LocalDateTime.now(BEIJING);
             }
             default -> {
@@ -145,5 +153,45 @@ public class PipelineRun {
 
     public String getStartTimeFormatted() {
         return startTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+    }
+
+    // ===== 多分支合并预览部署 =====
+
+    public boolean isMergeDeploy() {
+        return config != null && config.isMergeDeploy();
+    }
+
+    public String getMergeCommitSha() {
+        return mergeCommitSha;
+    }
+
+    public void setMergeCommitSha(String mergeCommitSha) {
+        this.mergeCommitSha = mergeCommitSha;
+    }
+
+    public List<String> getConflictFiles() {
+        return conflictFiles;
+    }
+
+    public void addConflictFile(String file) {
+        if (file != null && !file.trim().isEmpty()) {
+            conflictFiles.add(file.trim());
+        }
+    }
+
+    public String getPreviewNamespace() {
+        return previewNamespace;
+    }
+
+    public void setPreviewNamespace(String previewNamespace) {
+        this.previewNamespace = previewNamespace;
+    }
+
+    public String getPreviewNodePortUrl() {
+        return previewNodePortUrl;
+    }
+
+    public void setPreviewNodePortUrl(String previewNodePortUrl) {
+        this.previewNodePortUrl = previewNodePortUrl;
     }
 }

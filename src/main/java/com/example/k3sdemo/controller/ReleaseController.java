@@ -54,6 +54,12 @@ public class ReleaseController {
                 result.put("error", "镜像名称不能为空");
                 return result;
             }
+            String rtErr = config.validateRuntimeFields();
+            if (rtErr != null) {
+                result.put("success", false);
+                result.put("error", rtErr);
+                return result;
+            }
 
             ReleaseRecord record = releaseService.triggerRelease(config);
             result.put("success", true);
@@ -64,6 +70,65 @@ public class ReleaseController {
             result.put("error", "触发发布失败: " + e.getMessage());
         }
         return result;
+    }
+
+    /**
+     * 触发多分支合并预览发布 (Harbor 模式)。
+     */
+    @PostMapping("/release/merge-deploy/run")
+    @ResponseBody
+    public Map<String, Object> runMergeRelease(@RequestBody ReleaseConfig config) {
+        Map<String, Object> result = new HashMap<>();
+        try {
+            if (config.getGitUrl() == null || config.getGitUrl().isEmpty()) {
+                result.put("success", false);
+                result.put("error", "Git 仓库地址不能为空");
+                return result;
+            }
+            if (config.getImageName() == null || config.getImageName().isEmpty()) {
+                result.put("success", false);
+                result.put("error", "镜像名称不能为空");
+                return result;
+            }
+            if (config.getNormalizedFeatureBranches().isEmpty()) {
+                result.put("success", false);
+                result.put("error", "合并部署至少需要选择一个待合并分支 (feature branch)");
+                return result;
+            }
+            for (String b : config.getNormalizedFeatureBranches()) {
+                if (!isSafeBranchName(b)) {
+                    result.put("success", false);
+                    result.put("error", "非法分支名: " + b);
+                    return result;
+                }
+            }
+            if (!isSafeBranchName(config.getEffectiveBaseBranch())) {
+                result.put("success", false);
+                result.put("error", "非法基底分支名: " + config.getEffectiveBaseBranch());
+                return result;
+            }
+            String rtErr = config.validateRuntimeFields();
+            if (rtErr != null) {
+                result.put("success", false);
+                result.put("error", rtErr);
+                return result;
+            }
+
+            ReleaseRecord record = releaseService.triggerRelease(config);
+            result.put("success", true);
+            result.put("id", record.getId());
+            result.put("status", record.getStatus().name());
+            result.put("previewNamespace", config.getPreviewNamespace());
+            result.put("mergeSetId", config.getMergeSetId());
+        } catch (Exception e) {
+            result.put("success", false);
+            result.put("error", "触发合并发布失败: " + e.getMessage());
+        }
+        return result;
+    }
+
+    private boolean isSafeBranchName(String name) {
+        return name != null && name.matches("[A-Za-z0-9._/\\-]+");
     }
 
     /**
@@ -98,6 +163,17 @@ public class ReleaseController {
         result.put("imageName", record.getConfig().getImageName());
         result.put("gitUrl", record.getConfig().getGitUrl());
         result.put("branch", record.getConfig().getBranch());
+        result.put("runtime", record.getConfig().resolveRuntime());
+        result.put("pythonServer", record.getConfig().getPythonServer());
+        result.put("mergeDeploy", record.isMergeDeploy());
+        if (record.isMergeDeploy()) {
+            result.put("baseBranch", record.getConfig().getEffectiveBaseBranch());
+            result.put("featureBranches", record.getConfig().getNormalizedFeatureBranches());
+            result.put("mergeCommitSha", record.getMergeCommitSha());
+            result.put("conflictFiles", record.getConflictFiles());
+            result.put("previewNamespace", record.getPreviewNamespace());
+            result.put("previewNodePortUrl", record.getPreviewNodePortUrl());
+        }
         return result;
     }
 

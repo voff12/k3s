@@ -24,12 +24,21 @@ JOB_IMAGES=(
     "docker.io/rancher/k3s:latest|registry.cn-hangzhou.aliyuncs.com/rancher/k3s:v1.28.4-k3s2|docker.m.daocloud.io/rancher/k3s:latest"
 )
 
+# Python 运行时基础镜像 (Python 应用发布需要;按需调整版本)
+# 注: Python 构建生成的 Dockerfile 形如 FROM <localRegistry>/library/python:3.11-slim,
+#     因此除导入 containerd 外, 还需把该镜像推送到内网 Harbor / 本地 registry (见 README)。
+PYTHON_VERSION="${PYTHON_VERSION:-3.11}"
+JOB_IMAGES+=(
+    "docker.io/library/python:${PYTHON_VERSION}-slim|docker.m.daocloud.io/library/python:${PYTHON_VERSION}-slim|docker.xuanyuan.me/library/python:${PYTHON_VERSION}-slim"
+)
+
 # ============================================================
 # 第二部分: Dockerfile FROM 基础镜像 (导出到宿主机目录)
 # ============================================================
 BASE_IMAGES=(
     "eclipse-temurin:17-jdk-jammy"
     "maven:3.9-eclipse-temurin-17"
+    "python:${PYTHON_VERSION:-3.11}-slim"
 )
 
 TEMURIN_LOCAL_NAMES=(
@@ -50,6 +59,17 @@ MAVEN_LOCAL_NAMES=(
 MAVEN_REMOTE_SOURCES=(
     "docker.m.daocloud.io/library/maven:3.9-eclipse-temurin-17"
     "docker.xuanyuan.me/library/maven:3.9-eclipse-temurin-17"
+)
+
+PYV="${PYTHON_VERSION:-3.11}"
+PYTHON_LOCAL_NAMES=(
+    "docker.io/library/python:${PYV}-slim"
+    "python:${PYV}-slim"
+    "library/python:${PYV}-slim"
+)
+PYTHON_REMOTE_SOURCES=(
+    "docker.m.daocloud.io/library/python:${PYV}-slim"
+    "docker.xuanyuan.me/library/python:${PYV}-slim"
 )
 
 # 基础镜像导出目录
@@ -195,6 +215,7 @@ export_base_image() {
 
 export_base_image "eclipse-temurin:17-jdk-jammy" TEMURIN_LOCAL_NAMES TEMURIN_REMOTE_SOURCES "eclipse-temurin" "17-jdk-jammy"
 export_base_image "maven:3.9-eclipse-temurin-17" MAVEN_LOCAL_NAMES MAVEN_REMOTE_SOURCES "maven" "3.9-eclipse-temurin-17"
+export_base_image "python:${PYV}-slim" PYTHON_LOCAL_NAMES PYTHON_REMOTE_SOURCES "python" "${PYV}-slim"
 echo "阶段2: 成功 $((TOTAL2 - FAILED2))/$TOTAL2"
 echo ""
 
@@ -241,3 +262,12 @@ fi
 echo ""
 echo "[INFO] 完成! 基础镜像已导出到 $BASE_DIR"
 echo "[INFO] 流水线将通过 HostPath 挂载直接使用, 无需 Registry"
+echo ""
+echo "[Python 应用发布额外提示]"
+echo "  1) Python 构建生成的 Dockerfile 引用 <localRegistry>/library/python:${PYV:-3.11}-slim,"
+echo "     请确保该镜像也推送到内网 Harbor / 本地 registry, 例如:"
+echo "       docker pull python:${PYV:-3.11}-slim"
+echo "       docker tag  python:${PYV:-3.11}-slim <harbor>/library/python:${PYV:-3.11}-slim"
+echo "       docker push <harbor>/library/python:${PYV:-3.11}-slim"
+echo "  2) 'pip install' 需访问 PyPI 索引(公共镜像或内网私有 PyPI), 与 mvn 连 aliyun 同理 —"
+echo "     '离线' 仅指镜像离线, 依赖索引必须对 K3s 节点可达。可用 -Dpip.index 或 application 配置覆盖。"

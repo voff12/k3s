@@ -9,6 +9,9 @@ metadata:
 ---
 # ClusterRole - Grants cluster-wide read permissions and namespace-specific write permissions
 # This is needed because DashboardController and StoreController access cluster-scoped resources
+#
+# 合并预览部署 (preview-<id> 命名空间) 需要跨命名空间创建/删除命名空间及部署资源,
+# 因此把原本只在 default Role 里的写权限提升到 ClusterRole (集群范围生效)。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -21,13 +24,36 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["get", "list", "watch"]
-  # Namespace-scoped resources (read across all namespaces)
+  # Namespaces - 预览环境需要按需创建/回收独立命名空间 (preview-<mergeSetId>)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  # Pods (cluster-wide read + exec for terminal) — exec 用于 Pod 终端
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/exec", "pods/log"]
+    verbs: ["create", "get"]
+  # Jobs (cluster-wide) — Kaniko 构建 Job 在 default 提交, 但保持集群范围以便扩展
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Deployments / ReplicaSets (cluster-wide write) — 预览环境跨命名空间部署
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
+  # Services (cluster-wide) — 预览环境 NodePort Service 暴露
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Secrets (cluster-wide) — Harbor 认证 secret 复制到预览命名空间
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 # Role - Grants write permissions in the default namespace
 apiVersion: rbac.authorization.k8s.io/v1
