@@ -12,8 +12,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 应用接入与目录（P1）。
@@ -52,9 +54,8 @@ public class ApplicationService {
     @Transactional
     public Application create(CreateApplicationRequest req) {
         validate(req);
-        String code = req.getCode() != null && !req.getCode().isBlank()
-                ? req.getCode().trim()
-                : deriveCode(req.getRepoUrl());
+        String code = resolveCode(req);
+        List<String> environments = normalizeEnvironments(req.getEnvironments());
         if (applicationRepository.findByCode(code).isPresent()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "应用标识已存在: " + code);
         }
@@ -72,11 +73,10 @@ public class ApplicationService {
         app.setNamespace(req.getNamespace());
         app.setHealthPath(req.getHealthPath());
         app.setPolicyTemplateId(resolvePolicyTemplateId(req.getPolicyTemplateCode()));
-        app.setProdEnabled(req.getEnvironments() != null
-                && req.getEnvironments().contains("PROD"));
+        app.setProdEnabled(environments.contains("PROD"));
         Application saved = applicationRepository.save(app);
 
-        saveEnvironments(saved, req.getEnvironments());
+        saveEnvironments(saved, environments);
         activityLog.log(saved.getId(), null, "USER", req.getOperatorName(), "APP_ONBOARDED",
                 "接入应用 " + saved.getName(), null);
         return saved;
@@ -98,9 +98,23 @@ public class ApplicationService {
         }
     }
 
+    /** 优先用请求里的标识，否则从仓库地址推导；空或超出列宽（64）都拒绝 */
+    private String resolveCode(CreateApplicationRequest req) {
+        String code = req.getCode() != null && !req.getCode().isBlank()
+                ? req.getCode().trim()
+                : deriveCode(req.getRepoUrl());
+        if (code.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "无法从仓库地址推导应用标识，请手动填写");
+        }
+        if (code.length() > 64) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "应用标识不能超过 64 个字符: " + code);
+        }
+        return code;
+    }
+
     /** 从仓库地址推导应用标识：https://git.example.com/team/order-service.git → order-service */
     private String deriveCode(String repoUrl) {
-        String s = repoUrl.trim();
+        String s = repoUrl.trim().replaceAll("/+$", "");
         int slash = s.lastIndexOf('/');
         if (slash >= 0) {
             s = s.substring(slash + 1);
@@ -132,18 +146,30 @@ public class ApplicationService {
                         "策略模板不存在: " + policyCode));
     }
 
-    private void saveEnvironments(Application app, List<String> environments) {
+    /** trim + 转大写 + 去重；空项或未知环境返回 400 */
+    private List<String> normalizeEnvironments(List<String> environments) {
         if (environments == null) {
-            return;
+            return List.of();
         }
+        Set<String> normalized = new LinkedHashSet<>();
         for (String env : environments) {
+            if (env == null || env.isBlank()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "环境不能为空");
+            }
             String e = env.trim().toUpperCase(Locale.ROOT);
             if (!List.of("PREVIEW", "BETA", "PROD").contains(e)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "未知环境: " + env);
             }
+            normalized.add(e);
+        }
+        return List.copyOf(normalized);
+    }
+
+    private void saveEnvironments(Application app, List<String> environments) {
+        for (String env : environments) {
             AppEnvironment row = new AppEnvironment();
             row.setAppId(app.getId());
-            row.setEnv(e);
+            row.setEnv(env);
             row.setEnabled(true);
             appEnvironmentRepository.save(row);
         }

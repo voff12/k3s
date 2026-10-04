@@ -13,10 +13,13 @@ import com.example.k3sdemo.delivery.service.ReleasePersistenceService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,6 +92,72 @@ class DeliveryCenterIntegrationTest {
         onboardApp();
         assertThatThrownBy(this::onboardApp)
                 .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+    }
+
+    private CreateApplicationRequest minimalRequest(String repoUrl, List<String> environments) {
+        CreateApplicationRequest req = new CreateApplicationRequest();
+        req.setName("订单服务");
+        req.setRepoUrl(repoUrl);
+        req.setEnvironments(environments);
+        req.setOperatorName("吴工");
+        return req;
+    }
+
+    private void assertBadRequest(CreateApplicationRequest req) {
+        assertThatThrownBy(() -> applicationService.create(req))
+                .isInstanceOfSatisfying(ResponseStatusException.class,
+                        ex -> assertThat(ex.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST));
+    }
+
+    @Test
+    void onboardApplication_lowerCaseProdEnablesProd() {
+        Application app = applicationService.create(
+                minimalRequest("https://git.example.com/trade/order-service.git", List.of(" prod ")));
+
+        assertThat(app.getProdEnabled()).isTrue();
+        assertThat(appEnvironmentRepository.findByAppId(app.getId()))
+                .extracting("env")
+                .containsExactly("PROD");
+    }
+
+    @Test
+    void onboardApplication_duplicateEnvironmentsDeduplicated() {
+        Application app = applicationService.create(minimalRequest(
+                "https://git.example.com/trade/order-service.git", List.of("PREVIEW", "preview", "BETA")));
+
+        assertThat(appEnvironmentRepository.findByAppId(app.getId()))
+                .extracting("env")
+                .containsExactlyInAnyOrder("PREVIEW", "BETA");
+    }
+
+    @Test
+    void onboardApplication_nullOrBlankEnvironmentRejected() {
+        assertBadRequest(minimalRequest(
+                "https://git.example.com/trade/order-service.git", Arrays.asList("PREVIEW", null)));
+        assertBadRequest(minimalRequest(
+                "https://git.example.com/trade/order-service.git", List.of("PREVIEW", " ")));
+    }
+
+    @Test
+    void onboardApplication_trailingSlashRepoUrlDerivesCode() {
+        Application app = applicationService.create(
+                minimalRequest("https://git.example.com/trade/order-service/", null));
+
+        assertThat(app.getCode()).isEqualTo("order-service");
+    }
+
+    @Test
+    void onboardApplication_emptyDerivedCodeRejected() {
+        assertBadRequest(minimalRequest("https://git.example.com/trade/.git", null));
+    }
+
+    @Test
+    void onboardApplication_tooLongCodeRejected() {
+        CreateApplicationRequest explicitCode = minimalRequest("https://git.example.com/trade/order-service.git", null);
+        explicitCode.setCode("a".repeat(65));
+        assertBadRequest(explicitCode);
+
+        assertBadRequest(minimalRequest("https://git.example.com/trade/" + "b".repeat(65) + ".git", null));
     }
 
     @Test
