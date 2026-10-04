@@ -32,3 +32,4 @@ k3s.tar
 *.img
 .idea
 .vscode
+.tsien/
