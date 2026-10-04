@@ -148,12 +148,12 @@ public class ReleasePersistenceService {
                 "阶段[" + stage.getStageName() + "] " + s, release.getEnv());
     }
 
-    /** 业务编号：rel-20261005-018 风格（日期 + 当日序号） */
+    /** 业务编号：rel-20261005-018 风格（日期 + 当日序号，序号取自 release_no_seq） */
     private String nextReleaseNo() {
         String date = LocalDateTime.now().format(NO_FMT);
-        String prefix = "rel-" + date + "-";
-        long count = releaseRepository.count();
-        return String.format("%s%03d", prefix, count + 1);
+        releaseRepository.incrementDailySeq(date);
+        int seq = releaseRepository.findDailySeq(date);
+        return String.format("rel-%s-%03d", date, seq);
     }
 
     private String normalizeEnv(String env) {

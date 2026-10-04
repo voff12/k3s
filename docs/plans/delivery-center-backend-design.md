@@ -163,10 +163,10 @@ CREATE TABLE artifact (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='构建制品，digest 全局唯一';
 ```
 
-### 3.4 release（发布）
+### 3.4 delivery_release（发布；`release` 是 MySQL 8 保留字，不可用作表名）
 
 ```sql
-CREATE TABLE release (
+CREATE TABLE delivery_release (
   id            BIGINT AUTO_INCREMENT PRIMARY KEY,
   release_no    VARCHAR(32) NOT NULL COMMENT '业务编号，如 rel-20261005-018',
   app_id        BIGINT NOT NULL,
@@ -206,7 +206,7 @@ CREATE TABLE release_stage (
   created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uk_release_stage (release_id, stage_order),
-  CONSTRAINT fk_stage_rel FOREIGN KEY (release_id) REFERENCES release(id)
+  CONSTRAINT fk_stage_rel FOREIGN KEY (release_id) REFERENCES delivery_release(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='发布阶段明细';
 ```
 
@@ -225,7 +225,7 @@ CREATE TABLE rollout_step (
   created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   UNIQUE KEY uk_release_step (release_id, step_order),
-  CONSTRAINT fk_roll_rel FOREIGN KEY (release_id) REFERENCES release(id)
+  CONSTRAINT fk_roll_rel FOREIGN KEY (release_id) REFERENCES delivery_release(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='灰度扩流步骤';
 ```
 
@@ -244,7 +244,7 @@ CREATE TABLE approval (
   created_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at  DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   KEY idx_release_status (release_id, status),
-  CONSTRAINT fk_appr_rel FOREIGN KEY (release_id) REFERENCES release(id)
+  CONSTRAINT fk_appr_rel FOREIGN KEY (release_id) REFERENCES delivery_release(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='人工审批记录';
 ```
 
@@ -270,7 +270,7 @@ CREATE TABLE quality_event (
   KEY idx_app_status (app_id, status),
   KEY idx_severity (severity),
   CONSTRAINT fk_qe_app FOREIGN KEY (app_id) REFERENCES application(id),
-  CONSTRAINT fk_qe_rel FOREIGN KEY (release_id) REFERENCES release(id)
+  CONSTRAINT fk_qe_rel FOREIGN KEY (release_id) REFERENCES delivery_release(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='运行质量事件';
 ```
 
@@ -307,7 +307,7 @@ CREATE TABLE activity_log (
   KEY idx_app_time (app_id, created_at),
   KEY idx_release (release_id),
   CONSTRAINT fk_al_app FOREIGN KEY (app_id) REFERENCES application(id),
-  CONSTRAINT fk_al_rel FOREIGN KEY (release_id) REFERENCES release(id)
+  CONSTRAINT fk_al_rel FOREIGN KEY (release_id) REFERENCES delivery_release(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='统一活动流水';
 ```
 

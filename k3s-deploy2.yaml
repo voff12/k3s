@@ -97,6 +97,25 @@ spec:
             # Nacos 配置分组
             - name: NACOS_GROUP
               value: "DEFAULT_GROUP"
+            # 交付中心 MySQL 连接（凭据放 Secret，不写进清单）。部署前先创建：
+            #   kubectl create secret generic delivery-db \
+            #     --from-literal=url='jdbc:mysql://<host>:3306/delivery_center?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai' \
+            #     --from-literal=username=<user> --from-literal=password=<password>
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: delivery-db
+                  key: url
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: delivery-db
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: delivery-db
+                  key: password
 
 ---
 apiVersion: v1

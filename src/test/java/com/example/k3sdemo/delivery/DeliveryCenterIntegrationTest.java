@@ -7,6 +7,7 @@ import com.example.k3sdemo.delivery.entity.Release;
 import com.example.k3sdemo.delivery.entity.ReleaseStage;
 import com.example.k3sdemo.delivery.repository.AppEnvironmentRepository;
 import com.example.k3sdemo.delivery.repository.ArtifactRepository;
+import com.example.k3sdemo.delivery.repository.ReleaseRepository;
 import com.example.k3sdemo.delivery.service.ApplicationService;
 import com.example.k3sdemo.delivery.service.ReleasePersistenceService;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,6 +38,8 @@ class DeliveryCenterIntegrationTest {
     private AppEnvironmentRepository appEnvironmentRepository;
     @Autowired
     private ArtifactRepository artifactRepository;
+    @Autowired
+    private ReleaseRepository releaseRepository;
 
     private Application onboardApp() {
         CreateApplicationRequest req = new CreateApplicationRequest();
@@ -105,6 +110,29 @@ class DeliveryCenterIntegrationTest {
         assertThat(stages).extracting("stageCode")
                 .containsExactly("PR_CHECK", "BUILD", "PREVIEW", "BETA", "CANARY", "STABLE");
         assertThat(stages).allSatisfy(s -> assertThat(s.getStatus()).isEqualTo("PENDING"));
+    }
+
+    @Test
+    void createRelease_releaseNoIsDailySequence() {
+        Application app = onboardApp();
+        Artifact artifact = registerArtifact(app);
+        // 往日的发布不应占用今天的序号
+        Release pastRelease = new Release();
+        pastRelease.setReleaseNo("rel-20000101-001");
+        pastRelease.setAppId(app.getId());
+        pastRelease.setArtifactId(artifact.getId());
+        pastRelease.setEnv("PROD");
+        pastRelease.setStrategy("CANARY");
+        releaseRepository.save(pastRelease);
+
+        Release first = releasePersistenceService.create(
+                app.getId(), artifact.getId(), "PROD", "CANARY", null, "吴工");
+        Release second = releasePersistenceService.create(
+                app.getId(), artifact.getId(), "PROD", "CANARY", null, "吴工");
+
+        String todayPrefix = "rel-" + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
+        assertThat(first.getReleaseNo()).isEqualTo(todayPrefix + "001");
+        assertThat(second.getReleaseNo()).isEqualTo(todayPrefix + "002");
     }
 
     @Test

@@ -12,10 +12,11 @@ import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 
 /**
- * 发布记录（表 release，设计 3.4）。
+ * 发布记录（表 delivery_release，设计 3.4）。
+ * 不用 release 作表名：它是 MySQL 8 保留字。
  */
 @Entity
-@Table(name = "release")
+@Table(name = "delivery_release")
 public class Release {
 
     public enum Status {
