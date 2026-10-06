@@ -64,19 +64,20 @@ echo "Nacos Console: http://${NODE_IP}:30848/nacos"
 
    | 字段 | 值 |
    |------|----|
-   | Data ID | `k3s-demo.properties` |
+   | Data ID | `k3s-demo.yaml` |
    | Group | `DEFAULT_GROUP` |
-   | 配置格式 | `Properties` |
+   | 配置格式 | `YAML` |
    | 配置内容 | 见下方 |
 
-3. 配置内容：
+3. 配置内容（完整示例见项目根目录 `nacos-config-example.yaml`，含数据库、Harbor、流水线镜像等全部可托管项）：
 
-   ```properties
-   # Qwen (通义千问) AppKey
-   qwen.api.key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-
-   # 可选：覆盖其他配置
-   # qwen.api.model=qwen-max
+   ```yaml
+   qwen:
+     api:
+       # 通义千问 AppKey
+       key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+       # 可选：覆盖其他配置
+       # model: qwen-max
    ```
 
 4. 点击 **发布**。
@@ -85,11 +86,12 @@ echo "Nacos Console: http://${NODE_IP}:30848/nacos"
 
 ```bash
 NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
-
+# 配置内容建议直接从示例文件读取，避免手写转义
 curl -X POST "http://${NODE_IP}:30848/nacos/v1/cs/configs" \
-  --data-urlencode "dataId=k3s-demo.properties" \
+  --data-urlencode "dataId=k3s-demo.yaml" \
   --data-urlencode "group=DEFAULT_GROUP" \
-  --data-urlencode "content=qwen.api.key=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  --data-urlencode "type=yaml" \
+  --data-urlencode "content@nacos-config-example.yaml"
 ```
 
 ---
@@ -120,7 +122,7 @@ spring.application.name=k3s-demo
 spring.cloud.nacos.config.server-addr=${NACOS_SERVER_ADDR:127.0.0.1:8848}
 spring.cloud.nacos.config.namespace=${NACOS_NAMESPACE:}
 spring.cloud.nacos.config.group=${NACOS_GROUP:DEFAULT_GROUP}
-spring.cloud.nacos.config.file-extension=properties
+spring.cloud.nacos.config.file-extension=yaml
 spring.cloud.nacos.config.refresh-enabled=true
 ```
 

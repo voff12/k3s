@@ -1,0 +1,77 @@
+# ============================================================
+# Nacos 配置示例 — Data ID: k3s-demo.yaml
+# Group: DEFAULT_GROUP / 命名空间: public / 格式: YAML
+#
+# 用法：把本文件内容（按需修改值）粘到 Nacos 控制台新建配置，
+#       配置格式选 YAML（不是 Properties）。
+#
+# 优先级：Nacos 中的键 > 应用内置 application.properties > 代码默认值
+# 未写在本文件里的键，自动走应用内置默认，无需全量复制。
+# ============================================================
+
+# ---------- 1. 数据库（必填：JPA + Flyway 依赖，连不上应用起不来） ----------
+# 注意与 k3s-deploy2.yaml 的 delivery-db Secret 二选一：
+#   放 Nacos（本段）→ 直接覆盖 application.properties 的 ${DB_URL:...} 占位符，
+#                     集群注入的 Secret 环境变量即失效（无害，但形同虚设）；
+#   放 Secret（现状）→ 删除本段，凭据不进配置中心，安全性更好。
+spring:
+  datasource:
+    url: jdbc:mysql://192.168.1.100:3306/k3db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: root
+    password: ChangeMe_123
+
+# ---------- 2. Qwen AI（必填，应用侧无默认值，缺失则 AI 功能不可用） ----------
+qwen:
+  api:
+    # 通义千问 AppKey，创建于阿里云百炼/DashScope
+    key: sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    # OpenAI 兼容协议地址（一般不用改）
+    url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    # 模型：qwen-plus（均衡，代码默认）/ qwen-max（更强）/ qwen-turbo（更快）
+    model: qwen-max
+
+# ---------- 3. Harbor 镜像仓库（交付中心构建/推送用） ----------
+harbor:
+  # 地址（含端口）；离线环境用 IP:30002 形式
+  host: harbor.local:30002
+  # 节点 IP（用于生成集群外可访问的镜像地址，如 prewarm 脚本）
+  ip: 192.168.1.100
+  project: library
+  username: admin
+  # Harbor 密码原本散在 application.properties，收敛到 Nacos 统一管理
+  password: Harbor12345
+
+# ---------- 4. Git / GitLab ----------
+gitlab:
+  # GitLab Personal Access Token（私有仓库克隆用，公开仓库留空）
+  token: ""
+
+# ---------- 5. 流水线容器镜像（离线环境改为内网 Harbor 路径） ----------
+# 基础镜像仓库，默认取 harbor.host，一般不用单独设
+# local:
+#   registry: harbor.local:30002
+kaniko:
+  image: registry.aliyuncs.com/kaniko-project/executor:latest
+git:
+  # Git 代理（K3s Pod 无法直连 GitHub 时填，如 http://192.168.1.100:7890）
+  proxy: ""
+  image: alpine:3.19
+maven:
+  image: maven:3.9-eclipse-temurin-17
+loader:
+  image: rancher/k3s:latest
+
+# ============================================================
+# 【不要放进 Nacos 的配置】
+#  - server.port / management.* / spring.lifecycle.* ：部署形态相关，随镜像走
+#  - spring.cloud.nacos.* ：连接 Nacos 自身的引导配置，在 bootstrap.properties
+#  - spring.datasource.* 若走 Secret 注入则不放（见第 1 节二选一说明）
+# ============================================================
+
+# ============================================================
+# 【热刷新范围】仅 QwenService 标注了 @RefreshScope ——
+# 上面第 2 节（qwen.*）在 Nacos 改完发布后约 10 秒内自动生效，无需重启 Pod；
+#  第 1 节（spring.datasource.*）改连接地址/密码后需重启 Pod 才重新建连接池；
+#  第 3/4/5 节（harbor.* / gitlab.token / *.image）修改后同样需重启 Pod：
+#   kubectl rollout restart deployment/springboot-app
+# ============================================================
