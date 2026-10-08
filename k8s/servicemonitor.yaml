@@ -1,0 +1,32 @@
+# ============================================================
+# Prometheus 监控接入（ServiceMonitor + 应用自暴露指标）
+# 前置：集群已安装 Prometheus Operator（kube-prometheus-stack），
+#       否则 ServiceMonitor CRD 不存在，本清单无法 apply。
+# 安装参考（离线环境先预热镜像到 Harbor）：
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     -n monitoring --create-namespace \
+#     --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+# 注意 serviceMonitorSelectorNilUsesHelmValues=false：
+#   让 Prometheus 选中不带 helm release 标签的 ServiceMonitor（本清单）。
+# ============================================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: springboot-app-monitor
+  namespace: default
+  labels:
+    # release: monitoring  # 若 Prometheus 用默认 helm selector，改用这行代替上一行设置
+    app: springboot-app
+spec:
+  selector:
+    matchLabels:
+      app: springboot-app
+  namespaceSelector:
+    matchNames:
+      - default
+  endpoints:
+    - port: management          # 对应 Service 里命名的端口
+      path: /actuator/prometheus
+      interval: 15s
+      scrapeTimeout: 10s
