@@ -69,6 +69,10 @@ public class DevOpsService {
     private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(4);
 
+    /** 流水线持久化（可为空：交付中心数据源不可用时退化为纯内存模式） */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.example.k3sdemo.delivery.service.PipelineRunPersistenceService persistence;
+
     @PostConstruct
     public void init() {
         if (kubeconfig != null && !kubeconfig.isEmpty()) {
@@ -76,6 +80,28 @@ public class DevOpsService {
         }
         if (masterUrl != null && !masterUrl.isEmpty()) {
             System.setProperty("kubernetes.master", masterUrl);
+        }
+        restoreFromDatabase();
+    }
+
+    /**
+     * 启动时从数据库恢复流水线历史：
+     * - 已结束的记录直接回填内存（供列表/详情/SSE init 查询）；
+     * - 状态停在非终态的"僵尸任务"（进程重启前正在跑）标记为 FAILED。
+     */
+    private void restoreFromDatabase() {
+        if (persistence == null) {
+            return;
+        }
+        try {
+            persistence.markZombiesFailed();
+            List<PipelineRun> restored = persistence.loadAll();
+            for (PipelineRun run : restored) {
+                pipelineRuns.put(run.getId(), run);
+                emitters.put(run.getId(), new CopyOnWriteArrayList<>());
+            }
+        } catch (Exception e) {
+            System.err.println("[DevOpsService] 流水线历史恢复失败（不影响新任务）: " + e.getMessage());
         }
     }
 
@@ -114,6 +140,7 @@ public class DevOpsService {
             run.addLog("[INFO] Git代理: " + config.getGitProxy());
         }
 
+        persist(run, false);
         executor.submit(() -> executePipeline(run));
         return run;
     }
@@ -728,6 +755,7 @@ public class DevOpsService {
                 }
             }
         }
+        persist(run, false);
     }
 
     /**
@@ -1667,6 +1695,8 @@ public class DevOpsService {
      * Broadcast log update to all SSE emitters for a pipeline.
      */
     private void broadcastLog(PipelineRun run) {
+        persist(run, false);
+
         List<SseEmitter> list = emitters.get(run.getId());
         if (list == null || list.isEmpty())
             return;
@@ -1692,6 +1722,8 @@ public class DevOpsService {
      * Broadcast status update to all SSE emitters.
      */
     private void broadcastStatus(PipelineRun run) {
+        persist(run, false);
+
         List<SseEmitter> list = emitters.get(run.getId());
         if (list == null || list.isEmpty())
             return;
@@ -1716,6 +1748,11 @@ public class DevOpsService {
      * Complete all emitters for a pipeline.
      */
     private void completeEmitters(String pipelineId) {
+        PipelineRun run = pipelineRuns.get(pipelineId);
+        if (run != null) {
+            persist(run, true);
+        }
+
         List<SseEmitter> list = emitters.get(pipelineId);
         if (list == null)
             return;
@@ -1729,6 +1766,24 @@ public class DevOpsService {
             }
         }
         list.clear();
+    }
+
+    /**
+     * 把流水线当前状态同步到数据库（不抛异常：DB 故障不影响流水线执行）。
+     */
+    private void persist(PipelineRun run, boolean completed) {
+        if (persistence == null) {
+            return;
+        }
+        try {
+            if (completed) {
+                persistence.onCompleted(run);
+            } else {
+                persistence.onChanged(run);
+            }
+        } catch (Exception e) {
+            System.err.println("[DevOpsService] 流水线状态落库失败: " + e.getMessage());
+        }
     }
 
     // ========== Query methods ==========

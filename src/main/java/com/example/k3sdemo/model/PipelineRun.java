@@ -34,11 +34,11 @@ public class PipelineRun {
         }
     }
 
-    private final String id;
+    private volatile String id; // volatile：支持从 DB 恢复时覆盖
     private final PipelineConfig config;
     private volatile Status status;
     private volatile int currentStep; // 0-4
-    private final LocalDateTime startTime;
+    private volatile LocalDateTime startTime; // final → volatile：支持从 DB 恢复
     private volatile LocalDateTime endTime;
     private final List<String> logs;
     private volatile String errorMessage;
@@ -103,8 +103,51 @@ public class PipelineRun {
     public void fail(String errorMessage) {
         this.errorMessage = errorMessage;
         this.status = Status.FAILED;
+        this.currentStep = 5;
         this.endTime = LocalDateTime.now(BEIJING);
         addLog("[ERROR] " + errorMessage);
+    }
+
+    /**
+     * 从持久化记录完整恢复运行时状态（仅供 PipelineRunPersistenceService 启动加载用）。
+     * 不改变 id / config；status 与全部可变字段以 DB 为准。
+     */
+    public void restoreStatus(String runId, Status status, int currentStep, String errorMessage, List<String> logs,
+                              String mergeCommitSha, List<String> conflictFiles,
+                              String previewNamespace, String previewNodePortUrl,
+                              LocalDateTime startedAt, LocalDateTime finishedAt) {
+        this.id = runId;
+        this.status = status;
+        restoreState(currentStep, errorMessage, logs, mergeCommitSha, conflictFiles,
+                previewNamespace, previewNodePortUrl, startedAt, finishedAt);
+    }
+
+    /**
+     * 从持久化记录恢复运行时状态（仅供 PipelineRunPersistenceService 启动加载用）。
+     * 不改变 id / config / status；其余字段以 DB 为准。
+     */
+    public void restoreState(int currentStep, String errorMessage, List<String> logs,
+                             String mergeCommitSha, List<String> conflictFiles,
+                             String previewNamespace, String previewNodePortUrl,
+                             LocalDateTime startedAt, LocalDateTime finishedAt) {
+        this.currentStep = currentStep;
+        this.errorMessage = errorMessage;
+        this.logs.clear();
+        if (logs != null) {
+            this.logs.addAll(logs);
+        }
+        this.mergeCommitSha = mergeCommitSha;
+        this.conflictFiles.clear();
+        if (conflictFiles != null) {
+            this.conflictFiles.addAll(conflictFiles);
+        }
+        this.previewNamespace = previewNamespace;
+        this.previewNodePortUrl = previewNodePortUrl;
+        if (startedAt != null) {
+            this.startTime = startedAt;
+        }
+        this.endTime = finishedAt;
+        this.lastActivityTime = LocalDateTime.now(BEIJING);
     }
 
     // --- Getters ---
