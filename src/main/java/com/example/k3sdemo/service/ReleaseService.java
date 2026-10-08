@@ -551,6 +551,7 @@ public class ReleaseService {
                         "--skip-tls-verify",
                         "--cache=true",
                         "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
+                        "--snapshot-mode=redo",
                         "--verbosity=info")
                 .withNewResources()
                 .addToRequests("cpu", new Quantity("500m"))

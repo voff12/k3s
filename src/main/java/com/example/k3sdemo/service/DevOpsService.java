@@ -1255,6 +1255,7 @@ public class DevOpsService {
                         "--skip-tls-verify",
                         "--cache=true",
                         "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
+                        "--snapshot-mode=redo",
                         "--oci-layout-path=")
                 .addNewVolumeMount()
                 .withName("docker-config")
