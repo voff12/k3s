@@ -77,6 +77,58 @@ public class MetricsQueryService {
         return result;
     }
 
+    /** 全站请求成功率（P4 服务健康切片）：(1 - 5xx 占比) × 100，含趋势折线。 */
+    private static final String SUCCESS_RATE_EXPR =
+            "100 * (1 - sum(rate(http_server_requests_seconds_count{status=~\"5..\",uri!=\"/actuator/**\"}[5m]))"
+                    + " / clamp_min(sum(rate(http_server_requests_seconds_count{uri!=\"/actuator/**\"}[5m])), 1e-9))";
+
+    /** window 参数白名单：防止 PromQL 注入与异常窗口。 */
+    private static long windowSeconds(String window) {
+        if (window == null) {
+            return 24 * 3600;
+        }
+        switch (window.trim()) {
+            case "1h":
+                return 3600;
+            case "6h":
+                return 6 * 3600;
+            case "7d":
+                return 7 * 24 * 3600;
+            case "24h":
+            default:
+                return 24 * 3600;
+        }
+    }
+
+    /**
+     * 服务成功率总览（设计 4.4 /api/delivery/overview/success-rate）。
+     * Prometheus 未配置/不可达时返回 available=false，前端保持空态（不伪造数据）。
+     * window 支持 1h/6h/24h/7d，默认 24h；trend 为 [epochMillis, 成功率%] 序列。
+     */
+    public Map<String, Object> successRateOverview(String window) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        if (!configured()) {
+            result.put("available", false);
+            result.put("reason", "未配置 prometheus.url");
+            return result;
+        }
+        long seconds = windowSeconds(window);
+        String windowLabel = window == null ? "24h" : window.trim();
+        result.put("available", true);
+        result.put("prometheusUrl", prometheusUrl);
+        result.put("window", windowLabel);
+
+        // 当前成功率（即时查询，5m 窗口内的 5xx 占比）
+        result.put("successRatePct", queryScalar(SUCCESS_RATE_EXPR));
+
+        // 趋势折线（range 查询）：步长按窗口缩放，约 60 个点
+        long end = System.currentTimeMillis() / 1000;
+        long start = end - seconds;
+        long step = Math.max(60, seconds / 60);
+        result.put("trend", queryRange(SUCCESS_RATE_EXPR, start, end, step));
+        return result;
+    }
+
     /**
      * 执行即时（instant）PromQL，返回标量；查询无结果/异常返回 null。
      */
@@ -108,6 +160,58 @@ public class MetricsQueryService {
         } catch (Exception e) {
             org.slf4j.LoggerFactory.getLogger(MetricsQueryService.class)
                     .warn("prometheus query failed [{}]: {}", promql, String.valueOf(e.getMessage()));
+            return null;
+        }
+    }
+
+    /**
+     * 执行区间（range）PromQL，返回 [[epochMillis, value], ...] 趋势点；查询无结果/异常返回空列表。
+     */
+    private List<List<Object>> queryRange(String promql, long startSec, long endSec, long stepSec) {
+        try {
+            String encoded = java.net.URLEncoder.encode(promql, java.nio.charset.StandardCharsets.UTF_8);
+            Map<String, Object> resp = webClient.get()
+                    .uri(prometheusUrl + "/api/v1/query_range?query=" + encoded
+                            + "&start=" + startSec + "&end=" + endSec + "&step=" + stepSec)
+                    .retrieve()
+                    .bodyToMono(Map.class)
+                    .block(Duration.ofSeconds(6));
+            if (resp == null || !"success".equals(resp.get("status"))) {
+                return List.of();
+            }
+            Object data = resp.get("data");
+            if (!(data instanceof Map<?, ?> dm) || !(dm.get("result") instanceof List<?> results)
+                    || results.isEmpty()) {
+                return List.of();
+            }
+            Object first = results.get(0);
+            if (!(first instanceof Map<?, ?> series) || !(series.get("values") instanceof List<?> values)) {
+                return List.of();
+            }
+            List<List<Object>> points = new java.util.ArrayList<>(values.size());
+            for (Object v : values) {
+                if (v instanceof List<?> pair && pair.size() >= 2) {
+                    long epochMillis = (long) (Double.parseDouble(String.valueOf(pair.get(0))) * 1000);
+                    Double val = parseNumber(pair.get(1));
+                    if (val != null) {
+                        points.add(List.of(epochMillis, val));
+                    }
+                }
+            }
+            return points;
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(MetricsQueryService.class)
+                    .warn("prometheus range query failed [{}]: {}", promql, String.valueOf(e.getMessage()));
+            return List.of();
+        }
+    }
+
+    /** Prometheus 的 value 可能是数字或字符串（含 "NaN"），统一解析；NaN/不可解析返回 null。 */
+    private static Double parseNumber(Object raw) {
+        try {
+            double d = Double.parseDouble(String.valueOf(raw));
+            return Double.isNaN(d) || Double.isInfinite(d) ? null : d;
+        } catch (NumberFormatException e) {
             return null;
         }
     }

@@ -71,6 +71,12 @@ public class DeliveryQueryController {
         return ApiResponse.ok(metricsQueryService.qualityOverview());
     }
 
+    /** 服务成功率总览 + 趋势（设计 4.4 P4）。window 支持 1h/6h/24h/7d，默认 24h。 */
+    @GetMapping("/overview/success-rate")
+    public ApiResponse<Map<String, Object>> successRate(@RequestParam(defaultValue = "24h") String window) {
+        return ApiResponse.ok(metricsQueryService.successRateOverview(window));
+    }
+
     /** 应用目录（带环境列表，目录页主数据源）。 */
     @GetMapping("/app-catalog")
     public ApiResponse<List<Map<String, Object>>> appCatalog() {

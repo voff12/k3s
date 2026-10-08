@@ -70,7 +70,7 @@
           <div class="card"><div class="panel-head"><div><div class="panel-title">正在进行的发布</div><div class="panel-sub">全部环境</div></div><a class="text-link" href="#releases" data-go="releases">发布列表 →</a></div><div class="release-list" id="ongoingList"></div></div>
         </div>
         <div class="grid panels">
-          <div class="card health-card"><div class="panel-head"><div><div class="panel-title">服务成功率</div><div class="panel-sub">需要接入 Prometheus 监控</div></div></div><div class="empty-state"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><p>监控未接入</p><small>接入 Prometheus 后将展示全站请求成功率与 SLO 趋势</small></div></div>
+          <div class="card health-card"><div class="panel-head"><div><div class="panel-title">服务成功率</div><div class="panel-sub" id="successRateSub">需要接入 Prometheus 监控</div></div></div><div id="successRateBody"><div class="empty-state"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><p>监控未接入</p><small>接入 Prometheus 后将展示全站请求成功率与 SLO 趋势</small></div></div></div>
           <div class="card"><div class="panel-head"><div><div class="panel-title">应用状态</div><div class="panel-sub" id="healthSubtitle">接入的应用</div></div><a class="text-link" href="#apps" data-go="apps">应用目录 →</a></div><div class="quality-list" id="appHealthList"></div></div>
         </div>
         <div class="card activity"><div class="panel-head"><div><div class="panel-title">最近活动</div><div class="panel-sub">发布、质量事件和人工操作</div></div></div><div class="activity-list" id="activityList"></div></div>
@@ -189,7 +189,7 @@
     function closeDrawer(){document.getElementById('releaseDrawer').classList.remove('open');document.body.style.overflow=''}
 
     // ===== API =====
-    const API={applications:'/api/delivery/applications',appCatalog:'/api/delivery/app-catalog',releases:'/api/delivery/releases',activities:'/api/delivery/activities',artifacts:'/api/delivery/artifacts',settings:'/api/delivery/settings',quality:'/api/delivery/quality'};
+    const API={applications:'/api/delivery/applications',appCatalog:'/api/delivery/app-catalog',releases:'/api/delivery/releases',activities:'/api/delivery/activities',artifacts:'/api/delivery/artifacts',successRate:'/api/delivery/overview/success-rate',settings:'/api/delivery/settings',quality:'/api/delivery/quality'};
     let APPS=[],RELEASES=[],ACTIVITIES=[],ARTIFACTS=[],SETTINGS=null;
     async function fetchJson(url){const res=await fetch(url);const body=await res.json();if(!res.ok||body.code!==0){throw new Error(body.message||('HTTP '+res.status))}return body.data}
     function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -202,7 +202,38 @@
     async function loadReleases(){try{RELEASES=await fetchJson(API.releases)}catch(e){RELEASES=[];console.warn('loadReleases',e)}renderReleases();renderOverview()}
     async function loadActivities(){try{ACTIVITIES=await fetchJson(API.activities+'?limit=20')}catch(e){ACTIVITIES=[];console.warn('loadActivities',e)}renderActivities()}
     async function loadSettings(){try{SETTINGS=await fetchJson(API.settings)}catch(e){SETTINGS=null;console.warn('loadSettings',e)}renderSettings()}
-    async function loadCluster(force){loadQualityMetrics();try{const s=await fetchJson('/haagent/summary');renderCluster(s);renderQuality(s)}catch(e){renderCluster(null);renderQuality(null)}}
+    async function loadCluster(force){loadQualityMetrics();loadSuccessRate();try{const s=await fetchJson('/haagent/summary');renderCluster(s);renderQuality(s)}catch(e){renderCluster(null);renderQuality(null)}}
+    async function loadSuccessRate(){
+      const body=document.getElementById('successRateBody');
+      const sub=document.getElementById('successRateSub');
+      if(!body)return;
+      let m;
+      try{m=await fetchJson(API.successRate+'?window=24h')}catch(e){m=null}
+      if(!m||m.available===false){
+        sub.textContent='需要接入 Prometheus 监控';
+        body.innerHTML='<div class="empty-state"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><p>监控未接入</p><small>'+(m&&m.reason?esc(m.reason)+' · ':'')+'配置 prometheus.url 后展示全站请求成功率与 SLO 趋势</small></div>';
+        return;
+      }
+      sub.textContent='Prometheus · 窗口 '+(m.window||'24h');
+      const pct=m.successRatePct;
+      const slo=99.9;
+      const ok=pct!=null&&pct>=slo;
+      const trend=m.trend||[];
+      const vals=trend.map(p=>p[1]).filter(v=>v!=null);
+      let spark='';
+      if(vals.length>=2){
+        const min=Math.min.apply(null,vals),max=Math.max.apply(null,vals),rng=(max-min)||1,W=260,H=56;
+        const pts=trend.map((p,i)=>{const x=(i/(trend.length-1))*W;const y=H-((p[1]-min)/rng)*(H-6)-3;return x.toFixed(1)+','+y.toFixed(1)}).join(' ');
+        const sloY=H-((slo-min)/rng)*(H-6)-3;
+        spark='<svg viewBox="0 0 '+W+' '+H+'" style="width:100%;height:56px;display:block" preserveAspectRatio="none">'
+          +(slo>=min&&slo<=max?'<line x1="0" y1="'+sloY.toFixed(1)+'" x2="'+W+'" y2="'+sloY.toFixed(1)+'" stroke="var(--amber)" stroke-width="1" stroke-dasharray="4 3"/>':'')
+          +'<polyline points="'+pts+'" fill="none" stroke="'+(ok?'var(--green)':'var(--red)')+'" stroke-width="2"/></svg>';
+      }
+      body.innerHTML='<div style="padding:6px 2px 2px">'
+        +'<div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:30px;font-weight:700;color:'+(ok?'var(--green)':'var(--red)')+'">'+(pct==null?'—':Number(pct).toFixed(2)+'%')+'</span>'+pill(ok?'green':'red',ok?'达标':'低于 SLO')+'</div>'
+        +'<div style="font-size:11px;color:var(--muted);margin:2px 0 6px">SLO 目标 '+slo+'% · 近 '+(m.window||'24h')+'</div>'
+        +spark+'</div>';
+    }
     async function loadQualityMetrics(){
       const box=document.getElementById('sloMetricList');
       const sub=document.getElementById('sloSub');
