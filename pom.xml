@@ -92,11 +92,11 @@
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
         </dependency>
-        <!-- H2 仅测试用：无需本地 MySQL 即可跑仓储层测试 -->
+        <!-- H2：测试与本地演示模式（无需本地 MySQL 即可启动验证） -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <scope>test</scope>
+            <scope>runtime</scope>
         </dependency>
         <!-- WebClient for reactive HTTP client (more stable than RestTemplate) -->
         <dependency>
