@@ -19,6 +19,25 @@
     @media(max-width:700px){.sidebar{width:62px}.brand{padding:0;justify-content:center}.brand-copy,.nav-label,.nav-item span:not(.nav-count),.nav-count,.sidebar-bottom .cluster-mini>div:not(.cluster-orb),.user-row>div:not(.avatar),.user-more{display:none}.nav{padding:14px 8px}.nav-item{justify-content:center;padding:0}.nav-item svg{width:19px;height:19px}.sidebar-bottom{padding:8px}.cluster-mini{justify-content:center;padding:8px 0;border:0}.online-dot{display:none}.user-row{justify-content:center}.main{margin-left:62px}.topbar{height:56px;padding:0 13px}.content{padding:18px 13px 35px}.page-head{display:block}.head-tools{margin-top:14px}.page-title{font-size:20px}.stats{gap:9px}.stat{padding:13px;min-height:96px}.stat-value{font-size:22px}.two-col{grid-template-columns:1fr}.cluster-grid{grid-template-columns:1fr}.top-actions{gap:7px}.env-select{max-width:135px;padding:0 7px;font-size:10px}.crumb{font-size:10px}.drawer-head{padding:16px}.drawer-body{padding:13px}.table-tools{flex-wrap:wrap}.search{min-width:0;width:100%}.activity-env{display:none}}
     @media(max-width:1050px){.wizard-layout{grid-template-columns:1fr}.wizard-side{order:2}}
     @media(max-width:700px){.wizard-steps{padding:10px 6px}.wizard-step{font-size:0;justify-content:center;gap:4px}.wizard-step:not(:last-child):after{margin:0 4px}.wizard-step .num{font-size:9px}.wizard-card{padding:15px}.choice-grid{grid-template-columns:1fr}.field-row{grid-template-columns:1fr;gap:0}.review-list{grid-template-columns:105px 1fr}.review-list span,.review-list b{padding:8px;font-size:9px}}
+    /* ===== 人体工程学覆盖层（可读性/可点性/焦点可见）===== */
+    /* 1. 最小可读字号：正文类 9-10px 提升到 11-12px（表格/标签/说明） */
+    .data-table td{font-size:11px}.data-table th{font-size:10.5px}
+    .panel-sub,.field-help,.app-caption,.stat-foot,.quality-item small,.choice small,.check-row small,.release-meta,.attention-desc,.activity-copy{font-size:11px}
+    .pill{font-size:10.5px}.nav-label{font-size:10.5px}.step-name{font-size:10px}.evidence small{font-size:10px}
+    .btn{font-size:12px;min-height:34px}.text-link{font-size:11px}
+    .attention-time{font-size:10.5px}.activity-time{font-size:11px}
+    /* 2. 键盘焦点可见（Tab 导航不再"隐形"） */
+    a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
+    /* 3. 交互目标加大：行点击区域与悬停反馈 */
+    .quality-item{min-height:44px;align-items:center}
+    .nav-item{min-height:44px}
+    .attention{min-height:56px;align-items:center}
+    .data-table tbody tr:hover{background:#f2f7ff}
+    /* 4. 表单字号统一 12px，输入目标高度 38px */
+    .input,.textarea,.select{font-size:12px}.input{height:38px}
+    .choice{min-height:56px}
+    /* 5. toast 停留 4s（原 2.6s 阅读时间不足）——JS 侧同步调整 */
+    @media(max-width:700px){.wizard-step .num{font-size:10.5px}.review-list span,.review-list b{font-size:11px}}
   </style>
 </head>
 <body>
@@ -165,7 +184,7 @@
     window.addEventListener('hashchange',()=>{const k=location.hash.replace('#','');if(names[k])showView(k)});
     document.querySelectorAll('.nav-item[data-view], [data-go]').forEach(el=>el.addEventListener('click',e=>{e.preventDefault();showView(el.dataset.view||el.dataset.go)}));
     document.querySelectorAll('[data-choice-group]').forEach(button=>button.addEventListener('click',()=>{document.querySelectorAll('[data-choice-group="'+button.dataset.choiceGroup+'"]').forEach(item=>item.classList.remove('selected'));button.classList.add('selected')}));
-    let toastTimer;function toast(text){const el=document.getElementById('toast');el.textContent=text;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),2600);}
+    let toastTimer;function toast(text){const el=document.getElementById('toast');el.textContent=text;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),4000);}
     document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});
     function closeDrawer(){document.getElementById('releaseDrawer').classList.remove('open');document.body.style.overflow=''}
 
