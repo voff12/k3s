@@ -68,7 +68,7 @@
       <section class="view" id="view-quality">
         <div class="page-head"><div><div class="eyebrow">SERVICE RELIABILITY</div><h1 class="page-title">运行质量</h1><div class="page-subtitle">集群真实健康问题与 SLO 配置状态。</div></div><div class="head-tools"><button class="btn" onclick="loadCluster(true)">重新扫描</button></div></div>
         <div class="grid stats" id="qualityStats"></div>
-        <div class="grid panels"><div class="card"><div class="panel-head"><div><div class="panel-title">集群健康问题</div><div class="panel-sub">来自集群实时扫描</div></div></div><div class="quality-list" id="qualityIssueList"></div></div><div class="card"><div class="panel-head"><div><div class="panel-title">服务 SLO</div><div class="panel-sub">需要接入 Prometheus</div></div></div><div class="empty-state small"><p>SLO 监控未接入</p><small>接入后按应用展示可用性与延迟达标情况</small></div></div></div>
+        <div class="grid panels"><div class="card"><div class="panel-head"><div><div class="panel-title">集群健康问题</div><div class="panel-sub">来自集群实时扫描</div></div></div><div class="quality-list" id="qualityIssueList"></div></div><div class="card"><div class="panel-head"><div><div class="panel-title">服务 SLO</div><div class="panel-sub" id="sloSub">Prometheus 指标</div></div></div><div class="quality-list" id="sloMetricList"></div></div></div>
       </section>
       <section class="view" id="view-cluster">
         <div class="page-head"><div><div class="eyebrow">KUBERNETES OPERATIONS</div><h1 class="page-title">集群运维</h1><div class="page-subtitle">集群健康与工作负载入口。具体操作沿用现有运维页面。</div></div><div class="head-tools"><a class="btn" href="/dashboard">旧版总览 ↗</a></div></div>
@@ -170,7 +170,7 @@
     function closeDrawer(){document.getElementById('releaseDrawer').classList.remove('open');document.body.style.overflow=''}
 
     // ===== API =====
-    const API={applications:'/api/delivery/applications',appCatalog:'/api/delivery/app-catalog',releases:'/api/delivery/releases',activities:'/api/delivery/activities',artifacts:'/api/delivery/artifacts',settings:'/api/delivery/settings'};
+    const API={applications:'/api/delivery/applications',appCatalog:'/api/delivery/app-catalog',releases:'/api/delivery/releases',activities:'/api/delivery/activities',artifacts:'/api/delivery/artifacts',settings:'/api/delivery/settings',quality:'/api/delivery/quality'};
     let APPS=[],RELEASES=[],ACTIVITIES=[],ARTIFACTS=[],SETTINGS=null;
     async function fetchJson(url){const res=await fetch(url);const body=await res.json();if(!res.ok||body.code!==0){throw new Error(body.message||('HTTP '+res.status))}return body.data}
     function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -183,7 +183,33 @@
     async function loadReleases(){try{RELEASES=await fetchJson(API.releases)}catch(e){RELEASES=[];console.warn('loadReleases',e)}renderReleases();renderOverview()}
     async function loadActivities(){try{ACTIVITIES=await fetchJson(API.activities+'?limit=20')}catch(e){ACTIVITIES=[];console.warn('loadActivities',e)}renderActivities()}
     async function loadSettings(){try{SETTINGS=await fetchJson(API.settings)}catch(e){SETTINGS=null;console.warn('loadSettings',e)}renderSettings()}
-    async function loadCluster(force){try{const s=await fetchJson('/haagent/summary');renderCluster(s);renderQuality(s)}catch(e){renderCluster(null);renderQuality(null)}}
+    async function loadCluster(force){loadQualityMetrics();try{const s=await fetchJson('/haagent/summary');renderCluster(s);renderQuality(s)}catch(e){renderCluster(null);renderQuality(null)}}
+    async function loadQualityMetrics(){
+      const box=document.getElementById('sloMetricList');
+      const sub=document.getElementById('sloSub');
+      if(!box)return;
+      let m;
+      try{m=await fetchJson(API.quality)}catch(e){m=null}
+      if(!m||m.available===false){
+        sub.textContent='Prometheus 未接入';
+        box.innerHTML='<div class="empty-state small"><p>SLO 监控未接入</p><small>'+(m&&m.reason?esc(m.reason)+' · ':'')+'配置 prometheus.url 后展示 QPS/错误率/延迟/JVM 指标</small></div>';
+        return;
+      }
+      sub.textContent='Prometheus · 窗口 '+(m.window||'5m');
+      const fmt2=v=>v==null?'—':Number(v).toFixed(2);
+      const errOk=m.httpErrorRatePct==null?null:(m.httpErrorRatePct<1);
+      const rows=[
+        ['请求速率',fmt2(m.httpRequestsPerSecond)+' req/s',null],
+        ['5xx 错误率',fmt2(m.httpErrorRatePct)+' %',errOk==null?null:errOk?['green','达标']:['red','超标']],
+        ['P99 延迟',m.httpP99Seconds!=null?fmt2(m.httpP99Seconds*1000)+' ms':'未开启 histogram',m.p99HistogramEnabled?null:['gray','降级']],
+        ['最大延迟',m.httpMaxSeconds!=null?fmt2(m.httpMaxSeconds*1000)+' ms':'—',null],
+        ['JVM 堆内存',m.jvmMemoryUsedBytes!=null?(m.jvmMemoryUsedBytes/1048576).toFixed(0)+' / '+(m.jvmMemoryMaxBytes!=null?(m.jvmMemoryMaxBytes/1048576).toFixed(0):'?')+' MB':'—',null],
+        ['JDBC 连接',m.jdbcActiveConnections!=null?fmt2(m.jdbcActiveConnections)+' / '+(m.jdbcMaxConnections!=null?fmt2(m.jdbcMaxConnections):'?'):'—',null],
+        ['CPU 使用',m.processCpuUsage!=null?(m.processCpuUsage*100).toFixed(1)+' %':'—',null],
+        ['运行时长',m.uptimeSeconds!=null?Math.floor(m.uptimeSeconds/86400)+'d '+Math.floor(m.uptimeSeconds%86400/3600)+'h':'—',null]
+      ];
+      box.innerHTML=rows.map(r=>'<div class="quality-item"><div><b>'+esc(r[0])+'</b><small>Prometheus 即时查询</small></div><div class="quality-metric">'+esc(r[1])+(r[2]?'<small>'+pill(r[2][0],r[2][1])+'</small>':'')+'</div></div>').join('');
+    }
     async function loadPreviews(){try{const list=await fetchJson('/devops/previews');renderPreviews(list)}catch(e){renderPreviews(null)}}
     async function loadArtifacts(){const appId=document.getElementById('releaseApp').value;const box=document.getElementById('artifactChoices');if(!appId){box.innerHTML='<div class="field-help">请先选择应用</div>';ARTIFACTS=[];return}try{ARTIFACTS=await fetchJson(API.artifacts+'?appId='+appId)}catch(e){ARTIFACTS=[];box.innerHTML='<div class="field-help">加载制品失败：'+esc(e.message)+'</div>';return}renderArtifacts()}
     function refreshAll(){loadApps();loadReleases();loadActivities();loadCluster();loadPreviews()}

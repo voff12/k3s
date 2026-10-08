@@ -13,6 +13,7 @@ import com.example.k3sdemo.delivery.repository.IntegrationRepository;
 import com.example.k3sdemo.delivery.repository.PolicyTemplateRepository;
 import com.example.k3sdemo.delivery.service.ActivityLogService;
 import com.example.k3sdemo.delivery.service.ApplicationService;
+import com.example.k3sdemo.delivery.service.MetricsQueryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -40,25 +41,34 @@ public class DeliveryQueryController {
     private final ArtifactRepository artifactRepository;
     private final IntegrationRepository integrationRepository;
     private final PolicyTemplateRepository policyTemplateRepository;
+    private final MetricsQueryService metricsQueryService;
 
     public DeliveryQueryController(ActivityLogService activityLogService,
                                    ApplicationService applicationService,
                                    AppEnvironmentRepository appEnvironmentRepository,
                                    ArtifactRepository artifactRepository,
                                    IntegrationRepository integrationRepository,
-                                   PolicyTemplateRepository policyTemplateRepository) {
+                                   PolicyTemplateRepository policyTemplateRepository,
+                                   MetricsQueryService metricsQueryService) {
         this.activityLogService = activityLogService;
         this.applicationService = applicationService;
         this.appEnvironmentRepository = appEnvironmentRepository;
         this.artifactRepository = artifactRepository;
         this.integrationRepository = integrationRepository;
         this.policyTemplateRepository = policyTemplateRepository;
+        this.metricsQueryService = metricsQueryService;
     }
 
     /** 最近活动流（默认 30 条，上限 100）。 */
     @GetMapping("/activities")
     public ApiResponse<List<ActivityLog>> activities(@RequestParam(defaultValue = "30") int limit) {
         return ApiResponse.ok(activityLogService.recent(limit));
+    }
+
+    /** 运行质量指标（Prometheus 未配置/不可达时 available=false，前端显示空态）。 */
+    @GetMapping("/quality")
+    public ApiResponse<Map<String, Object>> quality() {
+        return ApiResponse.ok(metricsQueryService.qualityOverview());
     }
 
     /** 应用目录（带环境列表，目录页主数据源）。 */
