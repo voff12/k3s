@@ -61,7 +61,7 @@
       <section class="view" id="view-releases">
         <div class="page-head"><div><div class="eyebrow">DELIVERY HISTORY</div><h1 class="page-title">发布</h1><div class="page-subtitle">统一追踪变更从代码检查到稳定运行的完整旅程。</div></div><div class="head-tools"><button class="btn btn-primary" onclick="startWizard('release-create')">＋ 新建发布</button></div></div>
         <div class="grid stats" id="releaseStats"></div>
-        <div class="card"><div class="panel-head"><div><div class="panel-title">所有发布</div><div class="panel-sub">按创建时间倒序</div></div><div class="table-tools"><input class="search" placeholder="搜索发布号、应用或状态" data-filter="releaseTable"/><select class="select" id="releaseStatusFilter"><option value="">所有状态</option><option>PENDING</option><option>RUNNING</option><option>SUCCESS</option><option>FAILED</option></select></div></div><div class="table-wrap"><table class="data-table" id="releaseTable"><thead><tr><th>应用 / 发布</th><th>环境</th><th>策略</th><th>当前阶段</th><th>状态</th><th>创建时间</th></tr></thead><tbody id="releaseTbody"></tbody></table></div></div>
+        <div class="card"><div class="panel-head"><div><div class="panel-title">所有发布</div><div class="panel-sub">按创建时间倒序</div></div><div class="table-tools"><input class="search" placeholder="搜索发布号、应用或状态" data-filter="releaseTable"/><select class="select" id="releaseStatusFilter"><option value="">所有状态</option><option>PENDING</option><option>RUNNING</option><option>SUCCESS</option><option>FAILED</option></select></div></div><div class="table-wrap"><table class="data-table" id="releaseTable"><thead><tr><th>应用 / 发布</th><th>环境</th><th>策略</th><th>当前阶段</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="releaseTbody"></tbody></table></div></div>
       </section>
       <section class="view" id="view-quality">
         <div class="page-head"><div><div class="eyebrow">SERVICE RELIABILITY</div><h1 class="page-title">运行质量</h1><div class="page-subtitle">集群真实健康问题与 SLO 配置状态。</div></div><div class="head-tools"><button class="btn" onclick="loadCluster(true)">重新扫描</button></div></div>
@@ -207,11 +207,13 @@
       if(!RELEASES.length){tbody.innerHTML=emptyRow(6,'暂无发布记录 · 点击右上角「新建发布」开始');return}
       const filter=document.getElementById('releaseStatusFilter').value;
       const list=filter?RELEASES.filter(r=>r.status===filter):RELEASES;
-      if(!list.length){tbody.innerHTML=emptyRow(6,'该状态下暂无发布');return}
+      if(!list.length){tbody.innerHTML=emptyRow(7,'该状态下暂无发布');return}
       tbody.innerHTML=list.map(r=>{
         const app=appById(r.appId);
         const appName=app?app.name:'应用 #'+r.appId;
-        return '<tr onclick="openRelease('+r.id+')"><td><div class="app-title">'+esc(appName)+' <span class="app-caption">'+esc(r.releaseNo)+'</span></div></td><td>'+esc(r.env)+'</td><td>'+esc(r.strategy)+'</td><td>'+esc(stageLabel(r.currentStage))+'</td><td>'+releaseStatusPill(r.status)+'</td><td>'+esc(fmtDate(r.createdAt))+'</td></tr>'
+        const canExec=r.status==='PENDING'||r.status==='FAILED';
+        const execBtn=canExec?'<button class="btn btn-primary" onclick="event.stopPropagation();executeRelease('+r.id+',this)">执行</button>':'';
+        return '<tr onclick="openRelease('+r.id+')"><td><div class="app-title">'+esc(appName)+' <span class="app-caption">'+esc(r.releaseNo)+'</span></div></td><td>'+esc(r.env)+'</td><td>'+esc(r.strategy)+'</td><td>'+esc(stageLabel(r.currentStage))+'</td><td>'+releaseStatusPill(r.status)+'</td><td>'+esc(fmtDate(r.createdAt))+'</td><td>'+execBtn+'</td></tr>'
       }).join('');
     }
     document.getElementById('releaseStatusFilter').addEventListener('change',renderReleases);
@@ -340,6 +342,20 @@
     async function disableApp(id,name){
       if(!confirm('确认停用应用「'+name+'」？停用后不再出现在应用目录。'))return;
       try{await apiJson(API.applications+'/'+id,{method:'DELETE'});toast('已停用 '+name);loadApps()}catch(e){toast('停用失败：'+e.message)}
+    }
+    // ===== 执行发布（触发 Kaniko 流水线，阶段异步推进） =====
+    async function executeRelease(id,btn){
+      if(btn){btn.disabled=true;btn.textContent='触发中…'}
+      try{
+        const r=await apiJson(API.releases+'/'+id+'/execute',{method:'POST'});
+        toast('流水线已启动：'+r.releaseNo+'（'+r.status+'）· 阶段将自动推进');
+        loadReleases();loadActivities();
+        // 15 秒内周期刷新看阶段推进
+        let n=0;const timer=setInterval(()=>{loadReleases();if(++n>=5)clearInterval(timer)},3000);
+      }catch(e){
+        toast('执行失败：'+e.message);
+        if(btn){btn.disabled=false;btn.textContent='执行'}
+      }
     }
     async function apiJson(path,opt){
       const res=await fetch(path,opt);
