@@ -11,7 +11,7 @@
 
 | 位置 | Java 专用之处 |
 |------|--------------|
-| `DevOpsService.buildKanikoJob` 的 `rewrite-dockerfile` 容器 | 自动生成的多阶段 Dockerfile 固定为 `maven:3.9 AS builder` + `mvn` + `eclipse-temurin:17-jre`,`EXPOSE 8080` |
+| `DevOpsService.buildKanikoJob`（构建容器已换 BuildKit，方法名保留）的 `rewrite-dockerfile` 容器 | 自动生成的多阶段 Dockerfile 固定为 `maven:3.9 AS builder` + `mvn` + `eclipse-temurin:17-jre`,`EXPOSE 8080` |
 | `ReleaseService.buildReleaseJob` 的 `build` 容器 | 容器镜像为 `maven:3.9-eclipse-temurin-17`,执行 `mvn`,生成的 `Dockerfile.release` 为 `COPY target/*.jar` + `java -jar` |
 | 默认 `buildCommand` | `mvn clean package -DskipTests` |
 | 部署 | `containerPort` / `targetPort` 固定 `8080`(`deployToPreview`、`ensureService`、`deployToK3s`) |
@@ -41,7 +41,7 @@
 
 | runtime | 编译步骤 | 生成的 Dockerfile | 基础镜像 | 默认端口 | 启动方式 |
 |---------|---------|------------------|---------|---------|---------|
-| `java`(现状) | mvn(Release 模式独立容器 / DevOps 模式在 Kaniko 内) | 多阶段 `maven` → `jre` | `eclipse-temurin` | 8080 | `java -jar` |
+| `java`(现状) | mvn(Release 模式独立容器 / DevOps 模式在 BuildKit 构建内) | 多阶段 `maven` → `jre` | `eclipse-temurin` | 8080 | `java -jar` |
 | `python`(新增) | 无,pip 在镜像构建时安装 | 单阶段 `pip install` | `python:3.x-slim` | 8000 | `gunicorn` / `uvicorn` |
 | `dockerfile`(显式化) | 用户自带 | 不生成,仅重写 FROM 到本地 registry | 用户指定 | 用户指定 | 用户指定 |
 
@@ -116,7 +116,7 @@ CMD ["gunicorn", "-b", "0.0.0.0:<appPort>", "<appModule>"]
 - **pip 镜像源**:复用现有 Maven aliyun 镜像的同款思路,注入清华 / 阿里 `-i` 源(见第二节"离线语义":索引必须可达)。
 - **CMD 与 pythonServer 严格对应**:gunicorn 用 `-b host:port module`;uvicorn 用 `module --host --port`,不再只在注释里给。
 - **requirements 缺失即跳过 pip**:由 `requirementsPath` 是否存在决定,避免 `COPY` 失败。
-- **依赖缓存**:依赖 Kaniko 层缓存(`--cache=true --cache-repo=...kaniko-cache`,现已启用)。`requirements.txt` 不变时 `pip install` 层命中缓存,**无需新增 PVC**。
+- **依赖缓存**:依赖 BuildKit registry 缓存(`--export-cache/--import-cache type=registry,ref=...buildkit-cache,mode=max`)。`requirements.txt` 不变时 `pip install` 层命中缓存,**无需新增 PVC**。
 - **端口一致**:`EXPOSE` / `CMD` 绑定端口与 `appPort` 同源,且与 Service `targetPort` 一致。
 
 ---
@@ -147,21 +147,21 @@ CMD ["gunicorn", "-b", "0.0.0.0:<appPort>", "<appModule>"]
 
 ## 七、两套流水线的改造点
 
-### 7.1 DevOps 离线模式(`DevOpsService.buildKanikoJob`)
+### 7.1 DevOps 离线模式(`DevOpsService.buildKanikoJob`,构建容器已由 Kaniko 换为 BuildKit)
 
 - `rewrite-dockerfile` 容器脚本:按 `runtime` 分支,Python 走第五节单阶段模板;`auto` 时先探测。
-- 其余逻辑(FROM 重写到本地 registry、Kaniko `--no-push` → tar、`ctr import` 到节点)**完全复用**。
+- 其余逻辑(FROM 重写到本地 registry、BuildKit `--output type=docker,dest=image.tar` → tar、`ctr import` 到节点)**完全复用**。
 
 ### 7.2 Release Harbor 模式(`ReleaseService.buildReleaseJob`)
 
 > **行为变更(见 A)**:现状 Release 模式无条件生成 `Dockerfile.release` 并忽略用户 Dockerfile。本期改为先**检测仓库是否自带 Dockerfile**:
-> - 自带 Dockerfile → **优先使用**(重写 FROM 到 Harbor/本地 registry),kaniko `--dockerfile` 指向它;不再生成 jar 模板。**这会改变带 Dockerfile 的 Java 项目的现有行为**,需在发布说明中标注。
+> - 自带 Dockerfile → **优先使用**(重写 FROM 到 Harbor/本地 registry),BuildKit `--opt filename=` 指向它;不再生成 jar 模板。**这会改变带 Dockerfile 的 Java 项目的现有行为**,需在发布说明中标注。
 > - 无 Dockerfile → 按 runtime 生成(Java jar 模板 / Python 模板)。
 
 - `build` 容器:
   - Java(无 Dockerfile)保持 `maven` 镜像执行 `mvn`(挂载 `maven-repo-pvc`)。
   - **Python / dockerfile 模式改为仅 clone + 写 Harbor 认证**(用 `git` / `alpine` 镜像),不挂 `maven-repo-pvc`,不编译。
-- ⚠️ **衔接点(易漏)**:现有 Java `build` 容器顺带把 Harbor `docker-config/config.json` 写入,供后续 `kaniko-build` 推 Harbor。当 build 容器降级为"仅 clone"(Python / dockerfile 模式)后,**这段 docker-config 写入必须保留**(放在 clone 之后),否则 Kaniko 推 Harbor 会因缺认证失败。
+- ⚠️ **衔接点(易漏)**:现有 Java `build` 容器顺带把 Harbor `docker-config/config.json` 写入,供后续 `buildkit-build` 推 Harbor。当 build 容器降级为"仅 clone"(Python / dockerfile 模式)后,**这段 docker-config 写入必须保留**(放在 clone 之后),否则 BuildKit 推 Harbor 会因缺认证失败。
 - 生成 / 使用的 Dockerfile:
   - 自带 Dockerfile → 重写 FROM 后直接用。
   - Java 无 Dockerfile → 现状 runtime-only(`COPY target/*.jar`)。
@@ -204,7 +204,7 @@ CMD ["gunicorn", "-b", "0.0.0.0:<appPort>", "<appModule>"]
 6. **gunicorn/uvicorn 版本**:自动补装时不锁版本,可能与用户依赖冲突;可后续支持在 `requirements.txt` 中自带以精确控制。
 7. **输入注入**:新增字段拼入生成脚本,须按 4.1 校验;`startCommand` 为用户自负的逃生通道,UI 需标注风险。
 8. **框架能力边界(见 C)**:通用模板只做 `pip install` + 起服务,**不**执行 `migrate` / `collectstatic` / 设 `DJANGO_SETTINGS_MODULE`。Flask / FastAPI 单应用开箱即用;**Django 等需要迁移/静态/环境变量的框架**,请用 `startCommand` 串联(如 `python manage.py migrate && gunicorn proj.wsgi`)或自带 Dockerfile。UI 与文档需写明此边界。
-9. **日志/步骤文案硬编码 "Maven"(见 D)**:`DevOpsService` 现有日志写死"步骤2/5: Kaniko 多阶段构建 (Maven 打包...)"。Python 构建时这些文案会误导。实现时需把相关日志 / 步骤标题改为 **runtime 感知**(Java 显示"Maven 打包",Python 显示"pip 安装")或中性措辞(如"依赖安装 + 镜像构建")。
+9. **日志/步骤文案硬编码 "Maven"(见 D)**:`DevOpsService` 现有日志写死"步骤2/5: Kaniko 多阶段构建 (Maven 打包...)"（构建器已换 BuildKit,措辞需一并更新）。Python 构建时这些文案会误导。实现时需把相关日志 / 步骤标题改为 **runtime 感知**(Java 显示"Maven 打包",Python 显示"pip 安装")或中性措辞(如"依赖安装 + 镜像构建")。
 10. **离线多节点镜像局部性(见 E,预存约束)**:DevOps 离线模式 `ctr import` 只把镜像导入**运行构建 Job 的那个节点**;若预览 Deployment 被调度到其它节点 → `ImagePullBackOff`。对 Java 同样存在,但临时预览环境更易触发。**缓解**:单节点集群无影响;多节点可给预览 Pod 加 `nodeSelector`/`nodeAffinity` 绑定到构建节点,或改用 Harbor 推送(Release 模式天然规避)。本期文档列为已知限制。
 11. **预览 Pod 无环境变量/Secret 注入(跨语言,非 Python 专属)**:当前预览 Deployment 不支持注入 env / Secret。Python 应用常依赖 `DATABASE_URL`、`SECRET_KEY` 等环境变量才能起服务,Django 尤甚——这会削弱"联调/集成测试"预览的可用性(Java 同样受限)。**本期不做**,但建议作为预览功能的后续增强(给 `PipelineConfig`/`ReleaseConfig` 增加 `env` 键值表,部署时注入预览 Deployment)。
 
@@ -217,7 +217,7 @@ CMD ["gunicorn", "-b", "0.0.0.0:<appPort>", "<appModule>"]
 | 文件 | 改动 |
 |------|------|
 | `model/PipelineConfig.java`、`model/ReleaseConfig.java` | 新增 runtime / pythonVersion / appPort / pythonServer / appModule / requirementsPath / buildDeps / startCommand 字段 + 派生方法 |
-| `service/DevOpsService.java`(`buildKanikoJob` + 日志文案) | Python Dockerfile 模板 / 探测分支 / Dockerfile 优先逻辑;**步骤日志改 runtime 感知**(去掉写死的 "Maven") |
+| `service/DevOpsService.java`(`buildKanikoJob`,构建容器已换 BuildKit + 日志文案) | Python Dockerfile 模板 / 探测分支 / Dockerfile 优先逻辑;**步骤日志改 runtime 感知**(去掉写死的 "Maven") |
 | `service/ReleaseService.java`(`buildReleaseJob`) | **新增检测用户 Dockerfile → 优先使用**(行为变更);build 容器分支(Python/dockerfile 仅 clone + **保留 docker-config 写入**)+ Python 模板 + 基础镜像 |
 | 两套 `deployToPreview` / `deployToK3s` / `ensureService` | 端口参数化(去掉硬编码 8080) |
 | `controller/DevOpsController.java`、`controller/ReleaseController.java` | DTO 透传新字段 + **输入校验(4.1)** |
@@ -241,7 +241,7 @@ CMD ["gunicorn", "-b", "0.0.0.0:<appPort>", "<appModule>"]
 
 1. 准备一个最小 Flask/FastAPI 仓库(含 `requirements.txt` + `app.py` 暴露 `app`)。
 2. `/devops` 或 `/release` 新建,runtime 选 Python,填入口模块与端口 → 触发。
-3. 观察 SSE:clone →(探测/生成 Python Dockerfile)→ Kaniko 构建 → 导入/推送 → 部署。
+3. 观察 SSE:clone →(探测/生成 Python Dockerfile)→ BuildKit 构建 → 导入/推送 → 部署。
 4. `kubectl get pod` 确认镜像基于 `python:slim`,`curl http://<节点IP>:<NodePort>/` 返回应用响应。
 5. **多分支合并预览**:Python 仓库选 base + N 分支 → 部署到 `preview-<id>` → 访问预览 URL。
 6. **向后兼容**:不选 runtime(auto)的 Java 仓库行为不变。

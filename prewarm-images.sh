@@ -20,7 +20,7 @@ CTR="ctr -a /run/k3s/containerd/containerd.sock -n k8s.io"
 JOB_IMAGES=(
     "docker.io/library/alpine:3.19|registry.cn-hangzhou.aliyuncs.com/library/alpine:3.19"
     "docker.io/library/maven:3.9-eclipse-temurin-17|docker.m.daocloud.io/library/maven:3.9-eclipse-temurin-17|docker.xuanyuan.me/library/maven:3.9-eclipse-temurin-17"
-    "registry.aliyuncs.com/kaniko-project/executor:latest|registry.aliyuncs.com/kaniko-project/executor:latest"
+    "docker.io/moby/buildkit:v0.25.1-rootless|docker.m.daocloud.io/moby/buildkit:v0.25.1-rootless|docker.xuanyuan.me/moby/buildkit:v0.25.1-rootless"
     "docker.io/rancher/k3s:latest|registry.cn-hangzhou.aliyuncs.com/rancher/k3s:v1.28.4-k3s2|docker.m.daocloud.io/rancher/k3s:latest"
 )
 

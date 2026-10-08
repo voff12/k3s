@@ -44,8 +44,8 @@ public class DevOpsService {
     @Value("${gitlab.token:}")
     private String globalGitlabToken;
 
-    @Value("${kaniko.image:registry.cn-hangzhou.aliyuncs.com/kaniko-project/executor:latest}")
-    private String kanikoImage;
+    @Value("${buildkit.image:moby/buildkit:v0.25.1-rootless}")
+    private String buildkitImage;
 
     @Value("${git.image:alpine/git:latest}")
     private String gitImage;
@@ -245,13 +245,13 @@ public class DevOpsService {
                 broadcastLog(run);
             }
 
-            // ========== Step 2: Kaniko 多阶段构建 (Maven打包 + 镜像构建一体化) ==========
+            // ========== Step 2: BuildKit 多阶段构建 (Maven打包 + 镜像构建一体化) ==========
             run.advanceTo(PipelineRun.Status.BUILDING);
             broadcastStatus(run);
             String rt = config.resolveRuntime();
             String buildDesc = config.isPython() ? "pip 安装 + 镜像构建"
                     : ("java".equals(rt) ? "Maven 打包 + 镜像构建" : "依赖安装 + 镜像构建");
-            run.addLog("[INFO] ➜ 步骤2/5: Kaniko 构建 (" + buildDesc + ")...");
+            run.addLog("[INFO] ➜ 步骤2/5: BuildKit 构建 (" + buildDesc + ")...");
             run.addLog("[INFO] 运行时: " + rt + " | 基础镜像源: " + localRegistry);
             broadcastLog(run);
 
@@ -264,11 +264,11 @@ public class DevOpsService {
                 return;
             }
 
-            // 2b: Wait for kaniko init container (执行多阶段构建)
-            boolean kanikoOk = waitForInitContainerAndStreamLogs(client, podName, "kaniko", run);
+            // 2b: Wait for buildkit init container (执行多阶段构建)
+            boolean kanikoOk = waitForInitContainerAndStreamLogs(client, podName, "buildkit", run);
             if (!kanikoOk) {
                 diagnoseMainContainerFailure(client, jobName, run);
-                run.fail("Kaniko 构建失败，请查看日志");
+                run.fail("BuildKit 构建失败，请查看日志");
                 broadcastStatus(run);
                 return;
             }
@@ -598,7 +598,7 @@ public class DevOpsService {
                 return false;
             }
             if (i % 5 == 0 && i > 0) {
-                run.addLog("[INFO] 等待 Kaniko 容器启动...");
+                run.addLog("[INFO] 等待 BuildKit 容器启动...");
                 broadcastLog(run);
             }
             Thread.sleep(5000);
@@ -1238,28 +1238,49 @@ public class DevOpsService {
                 .endVolumeMount()
                 .endInitContainer();
 
-        // Init container 3: Kaniko (多阶段构建 → tar, 离线模式)
-        // Kaniko 执行多阶段 Dockerfile: Maven 打包 + 运行镜像构建一体完成
+        // Init container 3: BuildKit (多阶段构建 → tar, 离线模式)
+        // rootless daemonless 模式: buildctl-daemonless.sh 单容器起临时 daemon 构建,
+        // 产出 docker 格式 tar 供 loader 容器 ctr import 到 containerd
+        String cacheRef = harborHost + "/" + harborProject + "/buildkit-cache";
+        String buildkitCmd = "set -e; "
+                + "mkdir -p $HOME/.docker $HOME/.config/buildkit; "
+                + "cp /docker-config/config.json $HOME/.docker/config.json 2>/dev/null || true; "
+                + "printf '[registry.\"%s\"]\\n  http = true\\n  insecure = true\\n' \"" + harborHost
+                + "\" > $HOME/.config/buildkit/buildkitd.toml; "
+                + "printf '[registry.\"%s\"]\\n  http = true\\n  insecure = true\\n' \"" + localRegistry
+                + "\" >> $HOME/.config/buildkit/buildkitd.toml; "
+                + "exec buildctl-daemonless.sh build"
+                + " --frontend dockerfile.v0"
+                + " --local context=/workspace"
+                + " --local dockerfile=/workspace"
+                + " --opt filename=" + config.getDockerfilePath()
+                + " --opt build-arg:PIP_INDEX_URL=" + pipIndexUrl
+                + " --import-cache type=registry,ref=" + cacheRef
+                + " --export-cache type=registry,ref=" + cacheRef + ",mode=max"
+                + " --output type=docker,name=" + fullImage + ",dest=/workspace/image.tar"
+                + " --progress=plain";
         jobBuilder = jobBuilder
                 .addNewInitContainer()
-                .withName("kaniko")
-                .withImage(kanikoImage)
+                .withName("buildkit")
+                .withImage(buildkitImage)
                 .withImagePullPolicy("IfNotPresent")
-                .withArgs(
-                        "--dockerfile=" + config.getDockerfilePath(),
-                        "--context=dir:///workspace",
-                        "--no-push",
-                        "--tarPath=/workspace/image.tar",
-                        "--destination=" + fullImage,
-                        "--insecure",
-                        "--skip-tls-verify",
-                        "--cache=true",
-                        "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
-                        "--snapshot-mode=redo",
-                        "--oci-layout-path=")
+                .withCommand("/bin/sh", "-c")
+                .withArgs(buildkitCmd)
+                .addNewEnv()
+                .withName("BUILDKITD_FLAGS")
+                .withValue("--oci-worker-no-process-sandbox")
+                .endEnv()
+                .withNewSecurityContext()
+                .withRunAsUser(1000L)
+                .withRunAsGroup(1000L)
+                .withRunAsNonRoot(true)
+                .withNewSeccompProfile()
+                .withType("Unconfined")
+                .endSeccompProfile()
+                .endSecurityContext()
                 .addNewVolumeMount()
                 .withName("docker-config")
-                .withMountPath("/kaniko/.docker")
+                .withMountPath("/docker-config")
                 .endVolumeMount()
                 .withNewResources()
                 .addToRequests("cpu", new Quantity("500m"))

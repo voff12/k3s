@@ -14,8 +14,8 @@
 | 部署管理 | 创建、扩缩容、更新 | 镜像更新、资源配置、环境变量修改 |
 | 内存管理 | 集群内存分析 | 节点/Pod 内存排行、AI 优化建议、一键调整 |
 | 存储管理 | PV/PVC与磁盘 | PersistentVolume状态、PVC绑定关系、节点磁盘用量 |
-| CI/CD 流水线 | 代码到部署全链路 | Git → 构建 → Kaniko → K3s，实时日志流;支持 Java / Python / 自定义 Dockerfile |
-| 应用发布 | Git 到 Harbor 到 K3s | Git 克隆 → 构建 → Kaniko 推送 Harbor → K3s 部署 |
+| CI/CD 流水线 | 代码到部署全链路 | Git → 构建 → BuildKit → K3s，实时日志流;支持 Java / Python / 自定义 Dockerfile |
+| 应用发布 | Git 到 Harbor 到 K3s | Git 克隆 → 构建 → BuildKit 推送 Harbor → K3s 部署 |
 | 多分支合并预览 | 多分支集成联调 | 选 base + N 分支合并 → 独立 `preview-<id>` 命名空间 → NodePort 访问,TTL 自动回收 |
 | 多语言运行时 | Java / Python | runtime 选择(auto 探测);Python 走 pip + gunicorn/uvicorn,端口可配置 |
 | AI 工具 | Kubernetes 智能问答 | 基于通义千问，流式响应，Markdown 渲染 |
@@ -30,7 +30,7 @@
 - **前端**: Tailwind CSS + Material Icons + xterm.js
 - **实时通信**: WebSocket（终端）+ SSE（流水线日志/AI 流式响应）
 - **AI**: 阿里云通义千问（OpenAI 兼容协议）
-- **容器构建**: Kaniko（无 Docker daemon）
+- **容器构建**: BuildKit（rootless daemonless，无 Docker daemon、非特权容器）
 - **运行环境**: K3s + containerd
 
 ---
@@ -146,7 +146,7 @@ java -jar target/k3s-1.0.0-SNAPSHOT.jar
    - Harbor 项目（默认：library）
 
 2. **触发发布**：
-   - 系统自动执行：Git 克隆 → Maven 构建 → Kaniko 构建 → 推送 Harbor → 部署 K3s
+   - 系统自动执行：Git 克隆 → Maven 构建 → BuildKit 构建 → 推送 Harbor → 部署 K3s
 
 3. **查看实时日志**：
    - 页面实时显示构建和部署日志
@@ -172,7 +172,7 @@ k3s ctr images import k3s.tar
 
 ```
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│  Git Clone  │───▶│ Maven Build  │───▶│ Kaniko Build │
+│  Git Clone  │───▶│ Maven Build  │───▶│ BuildKit Build│
 │  克隆代码仓库  │    │ Maven 编译打包 │    │ 构建容器镜像  │
 └──────────────┘    └──────────────┘    └──────────────┘
                                               │
@@ -186,7 +186,7 @@ k3s ctr images import k3s.tar
 ### 发布流程特性
 
 - **两步自动化流程**：
-  1. **构建发布阶段**：Git 克隆 → Maven 构建 → 自动生成 Dockerfile → Kaniko 构建镜像 → 推送到 Harbor
+  1. **构建发布阶段**：Git 克隆 → Maven 构建 → 自动生成 Dockerfile → BuildKit 构建镜像 → 推送到 Harbor
   2. **K3s 部署阶段**：自动更新或创建 Deployment → 滚动更新 → 状态监控
 
 - **Harbor 集成**：
@@ -258,7 +258,7 @@ harbor.password=Harbor12345      # Harbor 密码
 **重要提示**：
 - 确保 Harbor 用户对指定项目有 **push** 权限
 - Harbor 认证使用 Base64 编码，自动处理
-- 如果 Harbor 使用自签名证书，Kaniko 会自动跳过 TLS 验证
+- 如果 Harbor 使用自签名证书或纯 HTTP，BuildKit 通过 buildkitd.toml 的 `http = true` / `insecure = true` 自动适配（流水线已内置）
 
 ---
 
@@ -317,7 +317,7 @@ harbor.password=Harbor12345      # Harbor 密码
 └──────────────┘    └──────────────┘    └──────────────┘
                                               │
       ┌──────────────┐    ┌──────────────┐    ▼
-      │    loader     │◀───│    kaniko     │◀───┌──────────────┐
+      │    loader     │◀───│   buildkit    │◀───┌──────────────┐
       │ 导入到 K3s    │    │ 构建容器镜像  │    │rewrite-dockerfile│
       │ containerd    │    │ (离线模式)    │    │ 智能 Dockerfile │
       └──────────────┘    └──────────────┘    └──────────────┘
@@ -325,7 +325,7 @@ harbor.password=Harbor12345      # Harbor 密码
 
 ### 流水线特性
 
-- **6 步全自动**: 代码克隆 → Maven 打包 → Dockerfile 处理 → Kaniko 构建 → 导入 K3s → 更新 Deployment
+- **6 步全自动**: 代码克隆 → Maven 打包 → Dockerfile 处理 → BuildKit 构建 → 导入 K3s → 更新 Deployment
 - **离线模式**: 基础镜像从 `localhost:5000` 拉取，无需外网
 - **智能 Dockerfile**: 自动检测基础镜像可用性，不可用时自动生成基于 `eclipse-temurin:17-jre-jammy` 的 Dockerfile
 - **实时日志**: SSE 流式推送，前端实时展示构建进度
@@ -345,7 +345,7 @@ sudo bash prewarm-images.sh
 
 | 阶段 | 内容 | 说明 |
 |------|------|------|
-| 阶段 1 | Job 容器镜像 → K3s containerd | Alpine、Maven、Kaniko、K3s loader、Registry |
+| 阶段 1 | Job 容器镜像 → K3s containerd | Alpine、Maven、BuildKit(rootless)、K3s loader、Registry |
 | 阶段 2 | 部署本地 Registry | `localhost:5000`，存储在 `/opt/local-registry` |
 | 阶段 3 | 基础镜像 → localhost:5000 | `eclipse-temurin:17-jre-jammy`，优先本地推送 |
 
@@ -468,7 +468,7 @@ git.proxy=                        # HTTP 代理，如 http://proxy:7890
 
 # ==================== 离线流水线 ====================
 local.registry=localhost:5000     # 本地镜像仓库
-kaniko.image=registry.aliyuncs.com/kaniko-project/executor:latest
+buildkit.image=moby/buildkit:v0.25.1-rootless
 git.image=alpine:3.19
 maven.image=maven:3.9-eclipse-temurin-17
 loader.image=rancher/k3s:latest
@@ -585,7 +585,7 @@ java -jar k3s-1.0.0-SNAPSHOT.jar
 
 4. **查看发布日志**：
    - 在发布页面查看详细错误信息
-   - 检查 Kaniko 容器的日志输出
+   - 检查 BuildKit 构建容器（buildkit / buildkit-build）的日志输出
 
 ### Harbor 镜像拉取失败：ImagePullBackOff
 
@@ -663,7 +663,7 @@ java -jar k3s-1.0.0-SNAPSHOT.jar
 2. **私有仓库**：填写 `gitToken` 字段（GitLab/GitHub Personal Access Token）
 3. **分支不存在**：确认指定的分支名称正确
 
-### Kaniko 构建超时
+### BuildKit 构建超时
 
 **问题**：镜像构建超过 30 分钟被终止。
 

@@ -53,8 +53,8 @@ public class ReleaseService {
     @Value("${gitlab.token:}")
     private String globalGitlabToken;
 
-    @Value("${kaniko.image:registry.aliyuncs.com/kaniko-project/executor:latest}")
-    private String kanikoImage;
+    @Value("${buildkit.image:moby/buildkit:v0.25.1-rootless}")
+    private String buildkitImage;
 
     @Value("${git.image:alpine:3.19}")
     private String gitImage;
@@ -142,12 +142,12 @@ public class ReleaseService {
 
         try (KubernetesClient client = new KubernetesClientBuilder().build()) {
 
-            // ========== Step 1: 构建发布 (Clone + 构建 + Kaniko → Harbor) ==========
+            // ========== Step 1: 构建发布 (Clone + 构建 + BuildKit → Harbor) ==========
             record.advanceTo(ReleaseRecord.Status.BUILDING);
             broadcastStatus(record);
             String rt = config.resolveRuntime();
             String buildChain = config.isPython() ? "克隆 → pip 镜像构建 → Harbor"
-                    : ("java".equals(rt) ? "克隆 → Maven → Kaniko → Harbor" : "克隆 → 构建 → Kaniko → Harbor");
+                    : ("java".equals(rt) ? "克隆 → Maven → BuildKit → Harbor" : "克隆 → 构建 → BuildKit → Harbor");
             record.addLog("[INFO] ➜ 步骤 1/2: 构建发布 (" + buildChain + ") | 运行时: " + rt);
             broadcastLog(record);
 
@@ -204,15 +204,15 @@ public class ReleaseService {
             }
             if (config.isMergeDeploy()) {
                 parseMergeResults(record);
-                record.addLog("[INFO] ✓ 多分支合并 + 准备完成, 开始 Kaniko 构建..."
+                record.addLog("[INFO] ✓ 多分支合并 + 准备完成, 开始 BuildKit 构建..."
                         + (record.getMergeCommitSha() != null ? " (merge commit: " + record.getMergeCommitSha() + ")" : ""));
             } else {
-                record.addLog("[INFO] ✓ 代码克隆 + 准备完成, 开始 Kaniko 构建...");
+                record.addLog("[INFO] ✓ 代码克隆 + 准备完成, 开始 BuildKit 构建...");
             }
             broadcastLog(record);
 
-            // 1b: Kaniko 构建镜像并推送到 Harbor
-            boolean imageOk = waitForInitContainerAndStreamLogs(client, podName, "kaniko-build", record);
+            // 1b: BuildKit 构建镜像并推送到 Harbor
+            boolean imageOk = waitForInitContainerAndStreamLogs(client, podName, "buildkit-build", record);
             if (!imageOk) {
                 diagnoseMainContainerFailure(client, jobName, record);
                 record.fail("镜像构建失败，请查看日志");
@@ -536,23 +536,42 @@ public class ReleaseService {
                 .endVolumeMount()
                 .endInitContainer()
 
-                // ===== Init Container 2: Kaniko Build & Push to Harbor =====
+                // ===== Init Container 2: BuildKit Build & Push to Harbor =====
                 // 使用生成的 Dockerfile.release (runtime-only), 直接打包 JAR
+                // rootless daemonless: buildctl-daemonless.sh 单容器起临时 daemon,
+                // --output type=image,push=true 直接推 Harbor; buildkitd.toml 声明 insecure registry
                 .addNewInitContainer()
-                .withName("kaniko-build")
-                .withImage(kanikoImage)
+                .withName("buildkit-build")
+                .withImage(buildkitImage)
                 .withImagePullPolicy("IfNotPresent")
-                .withCommand("/kaniko/executor")
-                .withArgs(
-                        "--dockerfile=/workspace/Dockerfile.release",
-                        "--context=dir:///workspace",
-                        "--destination=" + fullImage,
-                        "--insecure",
-                        "--skip-tls-verify",
-                        "--cache=true",
-                        "--cache-repo=" + harborHost + "/" + harborProject + "/kaniko-cache",
-                        "--snapshot-mode=redo",
-                        "--verbosity=info")
+                .withCommand("sh", "-c")
+                .withArgs("set -e; "
+                        + "mkdir -p $HOME/.docker $HOME/.config/buildkit; "
+                        + "cp /docker-config/config.json $HOME/.docker/config.json 2>/dev/null || true; "
+                        + "printf '[registry.\"%s\"]\\n  http = true\\n  insecure = true\\n' \"" + harborHost
+                        + "\" > $HOME/.config/buildkit/buildkitd.toml; "
+                        + "exec buildctl-daemonless.sh build"
+                        + " --frontend dockerfile.v0"
+                        + " --local context=/workspace"
+                        + " --local dockerfile=/workspace"
+                        + " --opt filename=Dockerfile.release"
+                        + " --export-cache type=registry,ref=" + harborHost + "/" + harborProject
+                        + "/buildkit-cache,mode=max"
+                        + " --import-cache type=registry,ref=" + harborHost + "/" + harborProject
+                        + "/buildkit-cache"
+                        + " --output type=image,name=" + fullImage + ",push=true")
+                .addNewEnv()
+                .withName("BUILDKITD_FLAGS")
+                .withValue("--oci-worker-no-process-sandbox")
+                .endEnv()
+                .withNewSecurityContext()
+                .withRunAsUser(1000L)
+                .withRunAsGroup(1000L)
+                .withRunAsNonRoot(true)
+                .withNewSeccompProfile()
+                .withType("Unconfined")
+                .endSeccompProfile()
+                .endSecurityContext()
                 .withNewResources()
                 .addToRequests("cpu", new Quantity("500m"))
                 .addToRequests("memory", new Quantity("1Gi"))
@@ -565,7 +584,7 @@ public class ReleaseService {
                 .endVolumeMount()
                 .addNewVolumeMount()
                 .withName("docker-config")
-                .withMountPath("/kaniko/.docker")
+                .withMountPath("/docker-config")
                 .endVolumeMount()
                 .endInitContainer()
 
