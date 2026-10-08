@@ -101,14 +101,14 @@ class DeliveryApiIntegrationTest {
         req.setOperatorName("吴工");
         applicationService.create(req);
 
+        // 注意：ReleaseExecutionIntegrationTest 无事务回滚（异步线程需要真实提交），
+        // 同 JVM 共享 H2 时可能残留其他应用，故只断言本用例创建的应用存在
         mockMvc.perform(get("/api/delivery/app-catalog"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
-                .andExpect(jsonPath("$.data.length()").value(1))
-                .andExpect(jsonPath("$.data[0].code").value("order-service"))
-                .andExpect(jsonPath("$.data[0].environments.length()").value(2))
-                .andExpect(jsonPath("$.data[0].environments[0]").value("PREVIEW"))
-                .andExpect(jsonPath("$.data[0].environments[1]").value("BETA"));
+                .andExpect(jsonPath("$.data[?(@.code=='order-service')].environments.length()").value(2))
+                .andExpect(jsonPath("$.data[?(@.code=='order-service')].environments[0]").value("PREVIEW"))
+                .andExpect(jsonPath("$.data[?(@.code=='order-service')].environments[1]").value("BETA"));
     }
 
     @Test

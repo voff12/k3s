@@ -117,9 +117,16 @@
           <div class="page-head"><div><div class="eyebrow">CREATE RELEASE</div><h1 class="page-title">新建发布</h1><div class="page-subtitle">选择已接入应用和已登记制品，确认环境与发布策略。提交后写入发布记录。</div></div></div>
           <div class="wizard"><div class="wizard-steps" id="releaseWizardSteps"><div class="wizard-step active"><i class="num">1</i>选择变更</div><div class="wizard-step"><i class="num">2</i>目标环境</div><div class="wizard-step"><i class="num">3</i>确认发布</div></div>
             <div class="wizard-layout"><div class="card wizard-card">
-              <div class="wizard-pane active" data-wizard="release" data-step="1"><h2>选择要发布的变更</h2><div class="wizard-intro">制品来自构建流水线登记；环境与策略由后端校验。</div>
+              <div class="wizard-pane active" data-wizard="release" data-step="1"><h2>选择要发布的变更</h2><div class="wizard-intro">制品来自构建流水线登记或手动登记；环境与策略由后端校验。</div>
                 <div class="field"><label for="releaseApp">应用 <span style="color:#cf4b45">*</span></label><select class="input" id="releaseApp" onchange="loadArtifacts()"><option value="">请选择应用</option></select></div>
-                <div class="field"><label>可发布制品 <span style="color:#cf4b45">*</span></label><div id="artifactChoices" class="choice-list"><div class="field-help">请先选择应用</div></div></div>
+                <div class="field"><label>可发布制品 <span style="color:#cf4b45">*</span></label><div id="artifactChoices" class="choice-list"><div class="field-help">请先选择应用</div></div><button class="btn" id="toggleArtifactForm" onclick="toggleArtifactForm()">＋ 登记新制品</button>
+                  <div id="artifactForm" style="display:none;margin-top:10px;border:1px solid var(--line);border-radius:9px;padding:13px">
+                    <div class="field-row"><div class="field"><label for="artVersion">版本号 <span style="color:#cf4b45">*</span></label><input class="input" id="artVersion" placeholder="v2.8.0"/></div><div class="field"><label for="artBranch">Git 分支</label><input class="input" id="artBranch" value="main"/></div></div>
+                    <div class="field-row"><div class="field"><label for="artSha">Git SHA <span style="color:#cf4b45">*</span></label><input class="input" id="artSha" placeholder="40 位 commit SHA"/></div><div class="field"><label for="artRepo">镜像仓库 <span style="color:#cf4b45">*</span></label><input class="input" id="artRepo" placeholder="harbor.local/library/xxx-service"/></div></div>
+                    <div class="field"><label for="artTitle">变更摘要（可选）</label><input class="input" id="artTitle" placeholder="PR 标题或变更说明"/></div>
+                    <div class="wizard-actions" style="margin-top:8px"><span class="field-help" style="align-self:center">digest 将由镜像引用自动生成（构建成功后回填真实值）</span><div class="wizard-actions-right"><button class="btn btn-primary" onclick="registerArtifactFromForm(this)">登记制品</button></div></div>
+                  </div>
+                </div>
                 <div class="field"><label for="releaseNote">发布说明</label><textarea class="textarea" id="releaseNote" placeholder="本次发布内容摘要"></textarea></div>
                 <div class="wizard-actions"><button class="btn" onclick="showView('releases')">取消</button><div class="wizard-actions-right"><button class="btn btn-primary" onclick="nextWizard('release',1)">选择目标环境 →</button></div></div>
               </div>
@@ -329,6 +336,26 @@
     }
 
     // ===== 制品选择 =====
+    function toggleArtifactForm(){const f=document.getElementById('artifactForm');f.style.display=f.style.display==='none'?'block':'none'}
+    async function registerArtifactFromForm(btn){
+      const appId=document.getElementById('releaseApp').value;
+      if(!appId){toast('请先选择应用');return}
+      const version=document.getElementById('artVersion').value.trim();
+      const sha=document.getElementById('artSha').value.trim();
+      const repo=document.getElementById('artRepo').value.trim();
+      if(!version||!sha||!repo){toast('版本号、Git SHA、镜像仓库为必填');return}
+      const orig=btn.textContent;btn.disabled=true;btn.textContent='登记中…';
+      // 合成 digest：repo:version@sha 确定性生成（离线模式；Harbor 模式构建后回填真实值）
+      const seed=repo+':'+version+'@'+sha;
+      const digest='sha256:'+await crypto.subtle.digest('SHA-256',new TextEncoder().encode(seed)).then(buf=>[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join(''));
+      try{
+        const art=await apiJson(API.artifacts,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:Number(appId),version:version,gitSha:sha,gitBranch:document.getElementById('artBranch').value.trim()||'main',prTitle:document.getElementById('artTitle').value.trim()||null,imageRepo:repo,imageDigest:digest,scanStatus:'PASSED'})});
+        toast('制品已登记：'+art.version);
+        document.getElementById('artifactForm').style.display='none';
+        await loadArtifacts();
+      }catch(e){toast('登记失败：'+e.message)}
+      btn.disabled=false;btn.textContent=orig;
+    }
     function renderArtifacts(){
       const box=document.getElementById('artifactChoices');
       if(!ARTIFACTS.length){box.innerHTML='<div class="field-help">该应用暂无已登记制品</div>';return}

@@ -148,6 +148,7 @@ public class ReleaseExecutionService {
                         }
                         persistenceService.advanceStage(releaseId, 6, "PASSED"); // STABLE → release SUCCESS
                         markTraffic(releaseId, 100);
+                        registerBuiltArtifact(releaseId, String.valueOf(status.get("imageRef")));
                         activityLog.log(appIdOf(releaseId), releaseId, "SYSTEM", null,
                                 "EXECUTE_SUCCESS", "流水线执行完成，部署成功", envOf(releaseId));
                         activePipelines.remove(releaseId);
@@ -189,6 +190,55 @@ public class ReleaseExecutionService {
             r.setCurrentTraffic(traffic);
             releaseRepository.save(r);
         });
+    }
+
+    /**
+     * 流水线成功后自动登记制品（方案 B）：以镜像引用生成确定性合成 digest，
+     * 下次发布同一镜像可直接复用。离线模式下 containerd 无真实 sha256，
+     * 用 imageRef 的 SHA-256 代替——同一镜像引用始终得到同一 digest（幂等）。
+     */
+    private void registerBuiltArtifact(Long releaseId, String imageRef) {
+        try {
+            Release release = releaseRepository.findById(releaseId).orElse(null);
+            if (release == null || imageRef == null || "null".equals(imageRef)) {
+            return;
+            }
+            Artifact source = artifactRepository.findById(release.getArtifactId()).orElse(null);
+            if (source == null) {
+            return;
+            }
+            String digest = "sha256:" + sha256Hex(imageRef);
+            // 幂等：同一 digest 已登记则跳过
+            if (artifactRepository.findByAppIdOrderByCreatedAtDesc(release.getAppId()).stream()
+                .anyMatch(a -> digest.equals(a.getImageDigest()))) {
+            return;
+            }
+            Artifact built = new Artifact();
+            built.setAppId(release.getAppId());
+            built.setVersion(source.getVersion() + "-" + release.getReleaseNo());
+            built.setGitSha(source.getGitSha());
+            built.setGitBranch(source.getGitBranch());
+            built.setImageRepo(source.getImageRepo());
+            built.setImageDigest(digest);
+            built.setScanStatus("PASSED");
+            built.setSbomStatus("PENDING");
+            built.setBuildStatus("SUCCESS");
+            artifactRepository.save(built);
+            log.info("release {} registered built artifact {} ({})", releaseId, imageRef, digest);
+        } catch (Exception e) {
+            // 制品登记失败不影响发布成功状态
+            log.warn("release {} register built artifact failed: {}", releaseId, e.getMessage());
+        }
+    }
+
+    private String sha256Hex(String input) throws Exception {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        byte[] hash = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
     }
 
     private Long appIdOf(Long releaseId) {

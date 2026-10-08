@@ -45,7 +45,8 @@ class ReleaseExecutionIntegrationTest {
         volatile String lastBranch;
         volatile String lastImage;
         final ConcurrentLinkedQueue<String> ids = new ConcurrentLinkedQueue<>();
-        volatile Map<String, Object> nextStatus = Map.of("status", "SUCCESS", "finished", true);
+        volatile Map<String, Object> nextStatus = Map.of(
+                "status", "SUCCESS", "finished", true, "imageRef", "harbor.local/library/order-service:rel-1");
 
         @Override
         public String trigger(String gitUrl, String branch, String imageName,
@@ -145,6 +146,16 @@ class ReleaseExecutionIntegrationTest {
             Release r = releaseRepository.findById(id).orElseThrow();
             assertThat(r.getStatus()).isEqualTo("SUCCESS");
             assertThat(r.getCurrentTraffic()).isEqualTo(100);
+        });
+
+        // 方案 B：流水线成功后自动登记构建制品（digest = sha256(imageRef)）
+        await().atMost(java.time.Duration.ofSeconds(5)).untilAsserted(() -> {
+            List<Artifact> arts = artifactRepository
+                    .findByAppIdOrderByCreatedAtDesc(releaseRepository.findById(id).orElseThrow().getAppId());
+            assertThat(arts).anySatisfy(a -> {
+                assertThat(a.getImageDigest()).startsWith("sha256:");
+                assertThat(a.getBuildStatus()).isEqualTo("SUCCESS");
+            });
         });
 
         // 阶段断言：PR_CHECK/BUILD/CANARY/STABLE PASSED，PREVIEW/BETA SKIPPED
