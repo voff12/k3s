@@ -93,22 +93,40 @@ public class DeliveryQueryController {
     }
 
     /**
-     * 制品登记（最小实现，供流水线/演示注册构建产物）。
+     * 制品登记（供流水线/页面表单注册构建产物）。
+     * digest 可不传：由 repo:version@sha 确定性生成（离线模式合成值，同一输入幂等）。
      * digest 唯一，重复登记同一 digest 返回 409。
      */
     @PostMapping("/artifacts")
     public ApiResponse<Artifact> registerArtifact(@RequestBody Artifact artifact) {
         if (artifact.getAppId() == null || artifact.getVersion() == null
-                || artifact.getGitSha() == null || artifact.getImageRepo() == null
-                || artifact.getImageDigest() == null) {
+                || artifact.getGitSha() == null || artifact.getImageRepo() == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "appId、version、gitSha、imageRepo、imageDigest 均不能为空");
+                    "appId、version、gitSha、imageRepo 不能为空");
+        }
+        if (artifact.getImageDigest() == null || artifact.getImageDigest().isBlank()) {
+            artifact.setImageDigest("sha256:" + sha256Hex(
+                    artifact.getImageRepo() + ":" + artifact.getVersion()
+                            + "@" + artifact.getGitSha()));
         }
         applicationService.get(artifact.getAppId()); // 404 若应用不存在
         try {
             return ApiResponse.ok(artifactRepository.save(artifact));
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "制品 digest 已存在");
+        }
+    }
+
+    private String sha256Hex(String input) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            StringBuilder sb = new StringBuilder();
+            for (byte b : md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
         }
     }
 

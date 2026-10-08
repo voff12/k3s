@@ -345,16 +345,14 @@
       const repo=document.getElementById('artRepo').value.trim();
       if(!version||!sha||!repo){toast('版本号、Git SHA、镜像仓库为必填');return}
       const orig=btn.textContent;btn.disabled=true;btn.textContent='登记中…';
-      // 合成 digest：repo:version@sha 确定性生成（离线模式；Harbor 模式构建后回填真实值）
-      const seed=repo+':'+version+'@'+sha;
-      const digest='sha256:'+await crypto.subtle.digest('SHA-256',new TextEncoder().encode(seed)).then(buf=>[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join(''));
       try{
-        const art=await apiJson(API.artifacts,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:Number(appId),version:version,gitSha:sha,gitBranch:document.getElementById('artBranch').value.trim()||'main',prTitle:document.getElementById('artTitle').value.trim()||null,imageRepo:repo,imageDigest:digest,scanStatus:'PASSED'})});
+        // digest 由后端按 repo:version@sha 确定性生成（不依赖浏览器 crypto，HTTP 访问也可用）
+        const art=await apiJson(API.artifacts,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({appId:Number(appId),version:version,gitSha:sha,gitBranch:document.getElementById('artBranch').value.trim()||'main',prTitle:document.getElementById('artTitle').value.trim()||null,imageRepo:repo,scanStatus:'PASSED'})});
         toast('制品已登记：'+art.version);
         document.getElementById('artifactForm').style.display='none';
         await loadArtifacts();
       }catch(e){toast('登记失败：'+e.message)}
-      btn.disabled=false;btn.textContent=orig;
+      finally{btn.disabled=false;btn.textContent=orig}
     }
     function renderArtifacts(){
       const box=document.getElementById('artifactChoices');

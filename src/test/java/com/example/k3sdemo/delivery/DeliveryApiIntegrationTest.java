@@ -139,6 +139,25 @@ class DeliveryApiIntegrationTest {
     }
 
     @Test
+    void registerArtifact_generatesDigestWhenMissing() throws Exception {
+        Application app = onboardApp();
+        // 不传 imageDigest：后端按 repo:version@sha 生成（非安全上下文下的页面表单路径）
+        String body = """
+                {"appId":%d,"version":"v3.1.0","gitSha":"%s","gitBranch":"main",
+                 "imageRepo":"harbor.internal/library/order-service"}
+                """.formatted(app.getId(), "e".repeat(40));
+
+        mockMvc.perform(post("/api/delivery/artifacts").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.imageDigest").value(
+                        org.hamcrest.Matchers.matchesPattern("sha256:[0-9a-f]{64}")));
+
+        // 同输入幂等：再次登记同 repo:version@sha → 同 digest → 409
+        mockMvc.perform(post("/api/delivery/artifacts").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
     void settings_returnsPolicyTemplatesFromSeed() throws Exception {
         mockMvc.perform(get("/api/delivery/settings"))
                 .andExpect(status().isOk())
