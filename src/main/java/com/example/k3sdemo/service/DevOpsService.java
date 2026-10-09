@@ -1383,15 +1383,22 @@ public class DevOpsService {
 
     /** 确保 workspace PVC 存在 (不存在则创建, 已存在则跳过), 供增量 clone 复用。 */
     public static void ensureWorkspacePvc(KubernetesClient client, String pvcName) {
-        try {
-            client.persistentVolumeClaims().inNamespace("default").withName(pvcName).get();
+        // fabric8 的 get() 在资源不存在时返回 null (不是抛 404), 必须用 null 判断"需创建"
+        if (client.persistentVolumeClaims().inNamespace("default").withName(pvcName).get() != null) {
             return; // 已存在
-        } catch (KubernetesClientException notFound) {
-            if (notFound.getCode() != 404) {
-                throw notFound;
+        }
+        try {
+            client.persistentVolumeClaims().inNamespace("default").resource(buildWorkspacePvc(pvcName)).create();
+        } catch (KubernetesClientException conflict) {
+            if (conflict.getCode() != 409) {
+                throw conflict; // 并发创建撞名则视为已存在
             }
         }
-        PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+    }
+
+    /** 构造 workspace PVC 对象 (5Gi / RWO / default ns)。提取为纯函数便于测试。 */
+    public static PersistentVolumeClaim buildWorkspacePvc(String pvcName) {
+        return new PersistentVolumeClaimBuilder()
                 .withNewMetadata().withName(pvcName).withNamespace("default").endMetadata()
                 .withNewSpec()
                 .withAccessModes("ReadWriteOnce")
@@ -1400,13 +1407,6 @@ public class DevOpsService {
                 .endResources()
                 .endSpec()
                 .build();
-        try {
-            client.persistentVolumeClaims().inNamespace("default").resource(pvc).create();
-        } catch (KubernetesClientException conflict) {
-            if (conflict.getCode() != 409) {
-                throw conflict; // 并发创建撞名则视为已存在
-            }
-        }
     }
 
     /**
