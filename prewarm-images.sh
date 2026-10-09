@@ -133,7 +133,8 @@ echo ""
 # 消除每次构建重复下载 Alpine 包 (~30-60s/次)。
 echo "===== 阶段1.5: 构建 git-alpine:3.19 工具镜像 → containerd ====="
 echo ""
-GIT_ALPINE="docker.io/library/git-alpine:3.19"
+# 与 application.properties 的 git.image 一致 (本地 registry, 免依赖 docker.io 域名解析)
+GIT_ALPINE="172.16.223.135:5000/git-alpine:3.19"
 if $CTR images ls -q | grep -q "^${GIT_ALPINE}$"; then
     echo "[SKIP] $GIT_ALPINE 已存在"
 else

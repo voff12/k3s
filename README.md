@@ -469,7 +469,7 @@ git.proxy=                        # HTTP 代理，如 http://proxy:7890
 # ==================== 离线流水线 ====================
 local.registry=localhost:5000     # 本地镜像仓库
 buildkit.image=moby/buildkit:v0.25.1-rootless
-git.image=alpine:3.19
+git.image=172.16.223.135:5000/git-alpine:3.19   # 预装 git/curl 的自制工具镜像（prewarm-images.sh 阶段1.5 构建）
 maven.image=maven:3.9-eclipse-temurin-17
 loader.image=rancher/k3s:latest
 

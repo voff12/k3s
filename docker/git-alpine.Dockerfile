@@ -3,7 +3,7 @@
 # 预装 git + curl, 替代运行时 apk add —— 消除每次构建重复下载 Alpine 包 (~30-60s/次)。
 #
 # 构建 (K3s 节点上, prewarm-images.sh 会自动执行):
-#   docker build -t docker.io/library/git-alpine:3.19 -f docker/git-alpine.Dockerfile docker/
+#   docker build -t 172.16.223.135:5000/git-alpine:3.19 -f docker/git-alpine.Dockerfile docker/
 # 导入 containerd:
 #   ctr -a /run/k3s/containerd/containerd.sock -n k8s.io images import git-alpine.tar
 # ============================================================
