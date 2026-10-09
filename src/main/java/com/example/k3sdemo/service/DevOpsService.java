@@ -1113,23 +1113,35 @@ public class DevOpsService {
             cloneCmdBuilder.append("git config --global https.proxy ").append(config.getGitProxy()).append(" && ");
             cloneCmdBuilder.append("echo '[INFO] 已配置 Git 代理: ").append(config.getGitProxy()).append("' && ");
         }
-        // ===== 增量 clone: 同仓库 workspace 挂在按 gitUrl 哈希派生的 PVC 上 (见 buildBuildkitJob Volumes),
-        // 已存在则 fetch + reset --hard + clean (首次全量 clone 是一次性成本) =====
-        String base = config.isMergeDeploy() ? config.getEffectiveBaseBranch() : config.getBranch();
-        String ensureRepo = String.format(
+        // ===== 增量 clone: 同仓库 workspace 挂在按 gitUrl 哈希派生的 PVC 上 (见 buildBuildkitJob Volumes) =====
+        // 单分支模式: 浅克隆 + 浅增量 (ghproxy 大包传输不稳定, 全量 pack 必断; --depth 1 快照小一个数量级)
+        String branch = config.getBranch();
+        String ensureRepoShallow = String.format(
                 "if [ -d /workspace/.git ]; then "
-                        + "echo '[INFO] 检测到已有工作区缓存, 增量更新 (fetch + reset)...' && "
+                        + "echo '[INFO] 检测到已有工作区缓存, 浅增量更新 (fetch --depth 1 + reset)...' && "
                         + "cd /workspace && "
                         + "git remote set-url origin %s && "
-                        + "git fetch --prune origin && "
+                        + "git fetch --depth 1 origin %s && "
                         + "git checkout -f %s && "
-                        + "git reset --hard origin/%s && "
+                        + "git reset --hard FETCH_HEAD && "
                         + "git clean -fd; "
-                        + "else git clone --branch %s %s /workspace && cd /workspace; fi && ",
-                cloneUrl, base, base, base, cloneUrl);
+                        + "else git clone --depth 1 --branch %s %s /workspace && cd /workspace; fi && ",
+                cloneUrl, branch, branch, branch, cloneUrl);
         if (config.isMergeDeploy()) {
             // ===== 多分支合并模式: clone base + 逐个 merge feature, 冲突即中止 =====
-            // 合并需要完整历史, 不能用 --depth 1
+            // 合并需要完整历史做 merge, 不能用 --depth 1; 保留全量 clone + fetch
+            String base = config.getEffectiveBaseBranch();
+            String ensureRepo = String.format(
+                    "if [ -d /workspace/.git ]; then "
+                            + "echo '[INFO] 检测到已有工作区缓存, 增量更新 (fetch + reset)...' && "
+                            + "cd /workspace && "
+                            + "git remote set-url origin %s && "
+                            + "git fetch --prune origin && "
+                            + "git checkout -f %s && "
+                            + "git reset --hard origin/%s && "
+                            + "git clean -fd; "
+                            + "else git clone --branch %s %s /workspace && cd /workspace; fi && ",
+                    cloneUrl, base, base, base, cloneUrl);
             cloneCmdBuilder.append(ensureRepo);
             cloneCmdBuilder.append("git config user.email 'ci@k3s-demo.local' && ");
             cloneCmdBuilder.append("git config user.name 'k3s-demo-ci' && ");
@@ -1149,8 +1161,8 @@ public class DevOpsService {
             cloneCmdBuilder.append("echo \"[MERGE] MERGE_COMMIT=$(git rev-parse HEAD)\" && ");
             cloneCmdBuilder.append("echo '=== 合并完成，文件列表: ===' && ls -la /workspace");
         } else {
-            // ===== 单分支模式 (向后兼容) =====
-            cloneCmdBuilder.append(ensureRepo);
+            // ===== 单分支模式: 浅克隆 + 浅增量 =====
+            cloneCmdBuilder.append(ensureRepoShallow);
             cloneCmdBuilder.append("echo '[INFO] Clone completed successfully' && "
                     + "echo '=== 下载成功，文件列表: ===' && "
                     + "ls -la /workspace");

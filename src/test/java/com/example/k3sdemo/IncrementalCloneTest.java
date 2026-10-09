@@ -12,8 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 增量 clone 回归：两条流水线（DevOpsService / ReleaseService）的 clone 命令必须
  * ① 检测 /workspace/.git 存在则 fetch + reset --hard + git clean -fd（幂等更新）
- * ② 不存在才全量 clone
- * ③ workspace 卷挂按 gitUrl 哈希派生的 PVC，不再是 emptyDir。
+ * ② 单分支模式用浅克隆(--depth 1)+浅增量(fetch --depth 1)，绕开 ghproxy 大包断流
+ * ③ 合并模式保留全量 clone（merge 需要完整历史）
+ * ④ workspace 卷挂按 gitUrl 哈希派生的 PVC，不再是 emptyDir。
  */
 class IncrementalCloneTest {
 
@@ -24,16 +25,22 @@ class IncrementalCloneTest {
         String src = Files.readString(Path.of(path));
         assertTrue(src.contains("if [ -d /workspace/.git ]"),
                 name + " clone 命令缺少已有工作区检测");
+        // 单分支模式: 浅克隆 + 浅增量 (ghproxy 大包断流规避)
+        assertTrue(src.contains("git clone --depth 1 --branch"),
+                name + " 单分支首次克隆应用 --depth 1 浅克隆");
+        assertTrue(src.contains("git fetch --depth 1 origin"),
+                name + " 单分支增量路径应用 fetch --depth 1");
+        assertTrue(src.contains("git reset --hard FETCH_HEAD"),
+                name + " 单分支增量路径应 reset --hard 到 FETCH_HEAD");
+        // 合并模式: 全量 clone + 全量 fetch (merge 需要完整历史)
         assertTrue(src.contains("git fetch --prune origin"),
-                name + " 增量路径缺少 git fetch");
+                name + " 合并模式增量路径应保留全量 fetch --prune");
         assertTrue(src.contains("git reset --hard origin/"),
-                name + " 增量路径缺少 reset --hard 到远端分支");
+                name + " 合并模式增量路径应 reset --hard 到 origin/<base>");
         assertTrue(src.contains("git clean -fd"),
                 name + " 增量路径缺少 git clean -fd 清理残留");
         assertTrue(src.contains("git remote set-url origin"),
                 name + " 增量路径缺少 remote set-url（token/URL 变更时刷新凭据）");
-        assertFalse(src.contains("git clone --depth 1"),
-                name + " 不应再使用 --depth 1（增量需要完整历史）");
     }
 
     @Test
