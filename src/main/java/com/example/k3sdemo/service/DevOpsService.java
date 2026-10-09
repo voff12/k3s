@@ -1151,10 +1151,8 @@ public class DevOpsService {
             cloneUrl = config.getGitUrl();
         }
 
-        // 构建 clone 命令: 代理 + 超时 + 阿里云 Alpine 源 (缓解 "remote end hung up")
+        // 构建 clone 命令: 代理 + 超时 (git 已预装在 git-alpine 工具镜像内, 无需运行时安装包)
         StringBuilder cloneCmdBuilder = new StringBuilder();
-        cloneCmdBuilder.append("sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && ");
-        cloneCmdBuilder.append("apk add --no-cache git && ");
         cloneCmdBuilder.append("git config --global http.version HTTP/1.1 && ");
         cloneCmdBuilder.append("git config --global protocol.version 1 && ");
         cloneCmdBuilder.append("git config --global http.postBuffer 524288000 && ");
@@ -1242,8 +1240,6 @@ public class DevOpsService {
                 .withImage(gitImage) // Use gitImage (alpine)
                 .withImagePullPolicy("IfNotPresent")
                 .withCommand("sh", "-c", "echo '[INFO] Checking local registry...' && " +
-                        "sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories && " +
-                        "apk add --no-cache curl && " +
                         "curl -f -v --connect-timeout 5 http://" + localRegistry + "/v2/ && " +
                         "echo '[INFO] Local registry is reachable'")
                 .endInitContainer()

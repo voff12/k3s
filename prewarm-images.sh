@@ -13,6 +13,7 @@
 set -e
 
 CTR="ctr -a /run/k3s/containerd/containerd.sock -n k8s.io"
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 # ============================================================
 # 第一部分: 流水线 Job 容器镜像 (导入 containerd)
@@ -127,6 +128,32 @@ done
 echo "阶段1: 成功 $((TOTAL1 - FAILED1))/$TOTAL1"
 echo ""
 
+# ──────────── 阶段1.5: 构建自制工具镜像 git-alpine ────────────
+# init 容器 (registry-check / git-clone / rewrite-dockerfile) 用它替代 运行时 apk add,
+# 消除每次构建重复下载 Alpine 包 (~30-60s/次)。
+echo "===== 阶段1.5: 构建 git-alpine:3.19 工具镜像 → containerd ====="
+echo ""
+GIT_ALPINE="docker.io/library/git-alpine:3.19"
+if $CTR images ls -q | grep -q "^${GIT_ALPINE}$"; then
+    echo "[SKIP] $GIT_ALPINE 已存在"
+else
+    GIT_ALPINE_TAR="/tmp/git-alpine_3.19.tar"
+    if command -v docker > /dev/null 2>&1 \
+        && docker build -t "$GIT_ALPINE" -f "$REPO_ROOT/docker/git-alpine.Dockerfile" "$REPO_ROOT/docker/" \
+        && docker save "$GIT_ALPINE" -o "$GIT_ALPINE_TAR" \
+        && $CTR images import "$GIT_ALPINE_TAR"; then
+        echo "[OK] 已构建并导入 $GIT_ALPINE"
+    else
+        echo "[FAIL] git-alpine 构建/导入失败! 手动补救:"
+        echo "  docker build -t $GIT_ALPINE -f docker/git-alpine.Dockerfile docker/"
+        echo "  docker save $GIT_ALPINE -o /tmp/git-alpine.tar"
+        echo "  $CTR images import /tmp/git-alpine.tar"
+        FAILED1=$((FAILED1 + 1))
+    fi
+    rm -f "$GIT_ALPINE_TAR"
+fi
+echo ""
+
 # ──────────── 阶段2: 基础镜像 → 宿主机 tar 文件 ────────────
 echo "===== 阶段2: 基础镜像 → $BASE_DIR (Docker tar) ====="
 echo ""
@@ -230,6 +257,7 @@ for ENTRY in "${JOB_IMAGES[@]}"; do
     T="${P[0]}"
     if $CTR images ls -q | grep -q "^${T}$"; then echo "  [OK] $T"; else echo "  [!!] $T"; fi
 done
+if $CTR images ls -q | grep -q "^${GIT_ALPINE}$"; then echo "  [OK] $GIT_ALPINE"; else echo "  [!!] $GIT_ALPINE (不存在)"; fi
 echo ""
 echo "基础镜像 ($BASE_DIR):"
 for ORIGINAL in "${BASE_IMAGES[@]}"; do
