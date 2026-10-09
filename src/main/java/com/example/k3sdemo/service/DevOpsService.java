@@ -327,7 +327,12 @@ public class DevOpsService {
                 // 合并模式: 部署到独立预览命名空间 preview-<mergeSetId>
                 deployToPreview(client, config, fullImage, run);
             } else if (config.getDeploymentName() != null && !config.getDeploymentName().isEmpty()) {
-                deployToK3s(client, config, fullImage, run);
+                boolean deployed = deployToK3s(client, config, fullImage, run);
+                if (!deployed) {
+                    run.fail("部署后副本未就绪, 请查看日志");
+                    broadcastStatus(run);
+                    return;
+                }
             } else {
                 run.addLog("[INFO] 未指定 Deployment, 跳过部署步骤 (仅构建镜像)");
                 broadcastLog(run);
@@ -774,8 +779,9 @@ public class DevOpsService {
 
     /**
      * Deploy the built image to K3s by updating the Deployment.
+     * 返回副本是否最终 Ready; 未指定 Deployment 视为跳过部署(返回 true)。
      */
-    private void deployToK3s(KubernetesClient client, PipelineConfig config, String fullImage, PipelineRun run) {
+    private boolean deployToK3s(KubernetesClient client, PipelineConfig config, String fullImage, PipelineRun run) {
         try {
             String ns = config.getNamespace();
             String deployName = config.getDeploymentName();
@@ -786,7 +792,7 @@ public class DevOpsService {
             if (deployment == null) {
                 run.addLog("[WARN] Deployment 不存在: " + deployName + ", 在命名空间: " + ns);
                 run.addLog("[INFO] 跳过部署步骤");
-                return;
+                return true;
             }
 
             // Update the first container's image
@@ -801,24 +807,75 @@ public class DevOpsService {
             // Deployment 存在但 Service 缺失时补建, 已存在则不动)
             ensureService(client, ns, deployName, config.getEffectiveAppPort(), run);
 
-            // Wait for rollout
-            run.addLog("[INFO] 等待滚动更新完成...");
-            broadcastLog(run);
-            Thread.sleep(3000);
-
-            // Check rollout status
-            Deployment updated = client.apps().deployments()
-                    .inNamespace(ns).withName(deployName).get();
-            if (updated != null && updated.getStatus() != null) {
-                int desired = updated.getSpec().getReplicas() != null ? updated.getSpec().getReplicas() : 1;
-                int ready = updated.getStatus().getReadyReplicas() != null ? updated.getStatus().getReadyReplicas() : 0;
-                run.addLog("[INFO] 副本状态: " + ready + "/" + desired + " Ready");
-            }
-            broadcastLog(run);
+            // 部署后必须确认副本 Ready, 不再盲等 (对齐 ReleaseService.waitForDeploymentReady)
+            return waitForDeploymentReady(client, ns, deployName, DEPLOY_READY_TIMEOUT_MS, run);
 
         } catch (Exception e) {
             run.addLog("[ERROR] 部署失败: " + e.getMessage());
+            broadcastLog(run);
+            return false;
         }
+    }
+
+    /** 部署后等待副本 Ready 的超时时间。 */
+    private static final long DEPLOY_READY_TIMEOUT_MS = 180_000;
+
+    /**
+     * 轮询等待 Deployment 副本 Ready（readyReplicas >= desired）。
+     * 超时、Deployment 取不到/被删或等待被中断都返回 false，并留下带原因的日志。
+     */
+    private boolean waitForDeploymentReady(KubernetesClient client, String namespace, String deployName,
+            long timeoutMillis, PipelineRun run) {
+        run.addLog("[INFO] 等待副本就绪: " + deployName + " (最长 " + (timeoutMillis / 1000) + "s)...");
+        broadcastLog(run);
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (true) {
+            Deployment current = null;
+            String fetchError = null;
+            try {
+                current = client.apps().deployments().inNamespace(namespace).withName(deployName).get();
+            } catch (Exception e) {
+                fetchError = e.getMessage();
+            }
+            if (isDeploymentReady(current)) {
+                run.addLog("[INFO] ✓ 副本已就绪: " + deployName + " ("
+                        + readyReplicasOf(current) + "/" + desiredReplicasOf(current) + " Ready)");
+                broadcastLog(run);
+                return true;
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                String reason = current == null
+                        ? (fetchError != null ? "Deployment 查询失败: " + fetchError : "Deployment 不存在或已被删除")
+                        : "副本 " + readyReplicasOf(current) + "/" + desiredReplicasOf(current) + " Ready 超时";
+                run.addLog("[ERROR] 副本未就绪: " + deployName + ", 原因: " + reason);
+                broadcastLog(run);
+                return false;
+            }
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                run.addLog("[ERROR] 就绪确认失败: 等待被中断");
+                broadcastLog(run);
+                return false;
+            }
+        }
+    }
+
+    /** Deployment 副本是否已 Ready（desired 缺省按 1）。 */
+    static boolean isDeploymentReady(Deployment deployment) {
+        if (deployment == null || deployment.getSpec() == null || deployment.getStatus() == null) {
+            return false;
+        }
+        return readyReplicasOf(deployment) >= desiredReplicasOf(deployment);
+    }
+
+    private static int desiredReplicasOf(Deployment deployment) {
+        return deployment.getSpec().getReplicas() != null ? deployment.getSpec().getReplicas() : 1;
+    }
+
+    private static int readyReplicasOf(Deployment deployment) {
+        return deployment.getStatus().getReadyReplicas() != null ? deployment.getStatus().getReadyReplicas() : 0;
     }
 
     /**
@@ -1345,6 +1402,8 @@ public class DevOpsService {
                 + " --import-cache type=registry,ref=" + cacheRef
                 + " --export-cache type=registry,ref=" + cacheRef + ",mode=max"
                 + " --output type=docker,name=" + fullImage + ",dest=/workspace/image.tar"
+                // 双输出: 同时直推 Harbor, 供非构建节点的 Pod 回源拉取 (多节点分发)
+                + " --output type=image,name=" + fullImage + ",push=true"
                 + " --progress=plain";
         jobBuilder = jobBuilder
                 .addNewInitContainer()
