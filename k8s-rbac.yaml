@@ -50,6 +50,10 @@ rules:
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # PVC — workspace 增量 clone PVC / buildkit 缓存 PVC 在 default 创建; StoreController 跨命名空间 list
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
   # Secrets (cluster-wide) — Harbor 认证 secret 复制到预览命名空间
   - apiGroups: [""]
     resources: ["secrets"]

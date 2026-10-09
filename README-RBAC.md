@@ -25,7 +25,7 @@ kubectl apply -f k8s-rbac.yaml
 ```
 
 **这将创建：**
-- **ClusterRole**：授予集群级只读权限（节点、持久卷、事件）；**并授予跨命名空间的写权限**（namespaces、deployments、services、secrets、jobs、pods/exec 等），以支持**合并预览部署**按需创建 `preview-<id>` 命名空间并跨命名空间部署
+- **ClusterRole**：授予集群级只读权限（节点、持久卷、事件）；**并授予跨命名空间的写权限**（namespaces、deployments、services、secrets、jobs、pods/exec、persistentvolumeclaims 等），以支持**合并预览部署**按需创建 `preview-<id>` 命名空间并跨命名空间部署
 - **Role**：在 default 命名空间内重复授予写权限（向后兼容保留，权限已由 ClusterRole 覆盖）
 - **ClusterRoleBinding**：将上述集群权限授予 `default` 服务账户
 - **RoleBinding**：将 default 命名空间的写权限授予 `default` 服务账户
