@@ -203,7 +203,7 @@
     async function loadReleases(){try{RELEASES=await fetchJson(API.releases)}catch(e){RELEASES=[];console.warn('loadReleases',e)}renderReleases();renderOverview()}
     async function loadActivities(){try{ACTIVITIES=await fetchJson(API.activities+'?limit=20')}catch(e){ACTIVITIES=[];console.warn('loadActivities',e)}renderActivities()}
     async function loadSettings(){try{SETTINGS=await fetchJson(API.settings)}catch(e){SETTINGS=null;console.warn('loadSettings',e)}renderSettings()}
-    async function loadCluster(force){loadQualityMetrics();loadSuccessRate();try{const s=await fetchJson('/haagent/summary');renderCluster(s);renderQuality(s)}catch(e){renderCluster(null);renderQuality(null)}}
+    async function loadCluster(force){loadQualityMetrics();loadSuccessRate();try{const res=await fetch('/haagent/summary');const s=await res.json();renderCluster(s);renderQuality(s)}catch(e){renderCluster(null);renderQuality(null)}}
     async function loadSuccessRate(){
       const body=document.getElementById('successRateBody');
       const sub=document.getElementById('successRateSub');
