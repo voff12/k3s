@@ -151,8 +151,13 @@ public class ReleaseService {
             record.addLog("[INFO] ➜ 步骤 1/2: 构建发布 (" + buildChain + ") | 运行时: " + rt);
             broadcastLog(record);
 
+            record.addLog("[INFO] 工作区缓存 PVC: " + DevOpsService.workspacePvcName(config.getGitUrl())
+                    + " (同仓库增量 clone, 二次构建仅 fetch 增量)");
+            broadcastLog(record);
+
             Job releaseJob = buildReleaseJob(jobName, record.getId(), config, fullImage);
             try {
+                DevOpsService.ensureWorkspacePvc(client, DevOpsService.workspacePvcName(config.getGitUrl()));
                 client.batch().v1().jobs().inNamespace("default").resource(releaseJob).create();
             } catch (KubernetesClientException e) {
                 int code = e.getCode();
@@ -161,6 +166,7 @@ public class ReleaseService {
                     broadcastLog(record);
                     cleanupJob(client, jobName);
                     Thread.sleep(3000);
+                    DevOpsService.ensureWorkspacePvc(client, DevOpsService.workspacePvcName(config.getGitUrl()));
                     client.batch().v1().jobs().inNamespace("default").resource(releaseJob).create();
                 } else {
                     String hint = code == -1
@@ -419,11 +425,23 @@ public class ReleaseService {
             buildCmdBuilder.append("git config --global http.proxy ").append(effectiveProxy).append(" && ");
             buildCmdBuilder.append("git config --global https.proxy ").append(effectiveProxy).append(" && ");
         }
-        // 克隆代码 (合并模式: clone base + 逐个 merge feature, 冲突即中止)
+        // ===== 增量 clone: 同仓库 workspace 挂在按 gitUrl 哈希派生的 PVC 上 (见 Volumes),
+        // 已存在则 fetch + reset --hard + clean (首次全量 clone 是一次性成本) =====
+        String base = config.isMergeDeploy() ? config.getEffectiveBaseBranch() : config.getBranch();
+        String ensureRepo = String.format(
+                "if [ -d /workspace/.git ]; then "
+                        + "echo '[INFO] 检测到已有工作区缓存, 增量更新 (fetch + reset)...' && "
+                        + "cd /workspace && "
+                        + "git remote set-url origin %s && "
+                        + "git fetch --prune origin && "
+                        + "git checkout -f %s && "
+                        + "git reset --hard origin/%s && "
+                        + "git clean -fd; "
+                        + "else git clone --branch %s %s /workspace && cd /workspace; fi && ",
+                cloneUrl, base, base, base, cloneUrl);
         if (config.isMergeDeploy()) {
-            String base = config.getEffectiveBaseBranch();
-            buildCmdBuilder.append("git clone --branch ").append(base)
-                    .append(" ").append(cloneUrl).append(" /workspace && cd /workspace && ");
+            // 合并需要完整历史, 不能用 --depth 1
+            buildCmdBuilder.append(ensureRepo);
             buildCmdBuilder.append("git config user.email 'ci@k3s-demo.local' && ");
             buildCmdBuilder.append("git config user.name 'k3s-demo-ci' && ");
             buildCmdBuilder.append("echo '[MERGE] 基底分支(base): ").append(base).append("' && ");
@@ -440,8 +458,7 @@ public class ReleaseService {
             buildCmdBuilder.append("echo \"[MERGE] MERGE_COMMIT=$(git rev-parse HEAD)\" && ");
             buildCmdBuilder.append("echo '[INFO] ✓ 多分支合并完成' && ");
         } else {
-            buildCmdBuilder.append("git clone --depth 1 --branch ").append(config.getBranch())
-                    .append(" ").append(cloneUrl).append(" /workspace && ");
+            buildCmdBuilder.append(ensureRepo);
             buildCmdBuilder.append("echo '[INFO] ✓ 代码克隆完成' && ");
         }
         // ===== runtime 感知: 始终产出 /workspace/Dockerfile.release + 写 Harbor 认证 =====
@@ -599,7 +616,9 @@ public class ReleaseService {
                 // ===== Volumes =====
                 .addNewVolume()
                 .withName("workspace")
-                .withNewEmptyDir().endEmptyDir()
+                .withNewPersistentVolumeClaim()
+                .withClaimName(DevOpsService.workspacePvcName(config.getGitUrl()))
+                .endPersistentVolumeClaim()
                 .endVolume()
                 .addNewVolume()
                 .withName("maven-repo")

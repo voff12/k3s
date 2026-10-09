@@ -170,9 +170,14 @@ public class DevOpsService {
             }
             broadcastLog(run);
 
+            run.addLog("[INFO] 工作区缓存 PVC: " + workspacePvcName(config.getGitUrl())
+                    + " (同仓库增量 clone, 二次构建仅 fetch 增量)");
+            broadcastLog(run);
+
             // ── Layer 1: API 提交防御 ──
             Job kanikoJob = buildKanikoJob(jobName, run.getId(), config, fullImage);
             try {
+                ensureWorkspacePvc(client, workspacePvcName(config.getGitUrl()));
                 client.batch().v1().jobs().inNamespace("default").resource(kanikoJob).create();
             } catch (KubernetesClientException e) {
                 int code = e.getCode();
@@ -182,6 +187,7 @@ public class DevOpsService {
                     broadcastLog(run);
                     cleanupJob(client, jobName);
                     Thread.sleep(3000);
+                    ensureWorkspacePvc(client, workspacePvcName(config.getGitUrl()));
                     client.batch().v1().jobs().inNamespace("default").resource(kanikoJob).create();
                 } else if (code == 403) {
                     run.fail("权限不足 (403 Forbidden): " + e.getMessage() + "\n请检查 ServiceAccount 权限");
@@ -1022,7 +1028,11 @@ public class DevOpsService {
         return "FROM " + fromPrefix + "/library/maven:3.9-eclipse-temurin-17 AS builder\n"
                 + "WORKDIR /build\n"
                 + "COPY . .\n"
-                + "RUN mkdir -p /root/.m2 && echo '" + settings + "' > /root/.m2/settings.xml && " + buildCmd + "\n"
+                // 依赖分层: settings 写入后先单独跑 dependency:go-offline, 该层只依赖 pom.xml,
+                // 可被 BuildKit registry cache 复用; 源码改动不再触发全量依赖下载
+                + "RUN mkdir -p /root/.m2 && echo '" + settings + "' > /root/.m2/settings.xml && "
+                + "(mvn -q dependency:go-offline || echo '[WARN] go-offline 未完全成功, 构建阶段将按需下载')\n"
+                + "RUN " + buildCmd + "\n"
                 + "\n"
                 + "FROM " + fromPrefix + "/library/eclipse-temurin:17-jre-jammy\n"
                 + "WORKDIR /app\n"
@@ -1103,12 +1113,24 @@ public class DevOpsService {
             cloneCmdBuilder.append("git config --global https.proxy ").append(config.getGitProxy()).append(" && ");
             cloneCmdBuilder.append("echo '[INFO] 已配置 Git 代理: ").append(config.getGitProxy()).append("' && ");
         }
+        // ===== 增量 clone: 同仓库 workspace 挂在按 gitUrl 哈希派生的 PVC 上 (见 buildKanikoJob Volumes),
+        // 已存在则 fetch + reset --hard + clean (首次全量 clone 是一次性成本) =====
+        String base = config.isMergeDeploy() ? config.getEffectiveBaseBranch() : config.getBranch();
+        String ensureRepo = String.format(
+                "if [ -d /workspace/.git ]; then "
+                        + "echo '[INFO] 检测到已有工作区缓存, 增量更新 (fetch + reset)...' && "
+                        + "cd /workspace && "
+                        + "git remote set-url origin %s && "
+                        + "git fetch --prune origin && "
+                        + "git checkout -f %s && "
+                        + "git reset --hard origin/%s && "
+                        + "git clean -fd; "
+                        + "else git clone --branch %s %s /workspace && cd /workspace; fi && ",
+                cloneUrl, base, base, base, cloneUrl);
         if (config.isMergeDeploy()) {
             // ===== 多分支合并模式: clone base + 逐个 merge feature, 冲突即中止 =====
-            String base = config.getEffectiveBaseBranch();
-            // 完整克隆 base (合并需要历史, 不能 --depth 1)
-            cloneCmdBuilder.append(String.format(
-                    "git clone --branch %s %s /workspace && cd /workspace && ", base, cloneUrl));
+            // 合并需要完整历史, 不能用 --depth 1
+            cloneCmdBuilder.append(ensureRepo);
             cloneCmdBuilder.append("git config user.email 'ci@k3s-demo.local' && ");
             cloneCmdBuilder.append("git config user.name 'k3s-demo-ci' && ");
             cloneCmdBuilder.append(String.format("echo '[MERGE] 基底分支(base): %s' && ", base));
@@ -1128,12 +1150,10 @@ public class DevOpsService {
             cloneCmdBuilder.append("echo '=== 合并完成，文件列表: ===' && ls -la /workspace");
         } else {
             // ===== 单分支模式 (向后兼容) =====
-            cloneCmdBuilder.append(String.format(
-                    "git clone --depth 1 --branch %s %s /workspace && " +
-                            "echo '[INFO] Clone completed successfully' && " +
-                            "echo '=== 下载成功，文件列表: ===' && " +
-                            "ls -la /workspace",
-                    config.getBranch(), cloneUrl));
+            cloneCmdBuilder.append(ensureRepo);
+            cloneCmdBuilder.append("echo '[INFO] Clone completed successfully' && "
+                    + "echo '=== 下载成功，文件列表: ===' && "
+                    + "ls -la /workspace");
         }
         String cloneCommand = cloneCmdBuilder.toString();
 
@@ -1330,8 +1350,9 @@ public class DevOpsService {
                 .endVolume()
                 .addNewVolume()
                 .withName("workspace")
-                .withNewEmptyDir()
-                .endEmptyDir()
+                .withNewPersistentVolumeClaim()
+                .withClaimName(workspacePvcName(config.getGitUrl()))
+                .endPersistentVolumeClaim()
                 .endVolume()
                 .addNewVolume()
                 .withName("k3s-sock")
@@ -1343,6 +1364,49 @@ public class DevOpsService {
                 .endTemplate()
                 .endSpec()
                 .build();
+    }
+
+    /** 按 gitUrl 派生 workspace PVC 名: 同一仓库多次构建复用同一 PVC, 实现增量 clone。 */
+    public static String workspacePvcName(String gitUrl) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
+            byte[] digest = md.digest((gitUrl == null ? "" : gitUrl).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 4; i++) {
+                sb.append(String.format("%02x", digest[i]));
+            }
+            return "workspace-pvc-" + sb;
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** 确保 workspace PVC 存在 (不存在则创建, 已存在则跳过), 供增量 clone 复用。 */
+    public static void ensureWorkspacePvc(KubernetesClient client, String pvcName) {
+        try {
+            client.persistentVolumeClaims().inNamespace("default").withName(pvcName).get();
+            return; // 已存在
+        } catch (KubernetesClientException notFound) {
+            if (notFound.getCode() != 404) {
+                throw notFound;
+            }
+        }
+        PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
+                .withNewMetadata().withName(pvcName).withNamespace("default").endMetadata()
+                .withNewSpec()
+                .withAccessModes("ReadWriteOnce")
+                .withNewResources()
+                .addToRequests("storage", new Quantity("5Gi"))
+                .endResources()
+                .endSpec()
+                .build();
+        try {
+            client.persistentVolumeClaims().inNamespace("default").resource(pvc).create();
+        } catch (KubernetesClientException conflict) {
+            if (conflict.getCode() != 409) {
+                throw conflict; // 并发创建撞名则视为已存在
+            }
+        }
     }
 
     /**
