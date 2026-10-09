@@ -36,6 +36,10 @@ public class Application {
     @Column(name = "repo_url", nullable = false, length = 512)
     private String repoUrl;
 
+    /** 私有仓库访问 token（各应用自配）；查询接口不回显明文 */
+    @Column(name = "git_token", length = 256)
+    private String gitToken;
+
     /** gitlab / github / other */
     @Column(name = "repo_provider", nullable = false, length = 16)
     private String repoProvider = "gitlab";
@@ -93,6 +97,8 @@ public class Application {
     public void setTeam(String team) { this.team = team; }
     public String getRepoUrl() { return repoUrl; }
     public void setRepoUrl(String repoUrl) { this.repoUrl = repoUrl; }
+    public String getGitToken() { return gitToken; }
+    public void setGitToken(String gitToken) { this.gitToken = gitToken; }
     public String getRepoProvider() { return repoProvider; }
     public void setRepoProvider(String repoProvider) { this.repoProvider = repoProvider; }
     public String getDefaultBranch() { return defaultBranch; }

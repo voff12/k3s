@@ -13,6 +13,7 @@ import com.example.k3sdemo.delivery.repository.IntegrationRepository;
 import com.example.k3sdemo.delivery.repository.PolicyTemplateRepository;
 import com.example.k3sdemo.delivery.service.ActivityLogService;
 import com.example.k3sdemo.delivery.service.ApplicationService;
+import com.example.k3sdemo.delivery.service.GitCommitService;
 import com.example.k3sdemo.delivery.service.MetricsQueryService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,6 +43,7 @@ public class DeliveryQueryController {
     private final IntegrationRepository integrationRepository;
     private final PolicyTemplateRepository policyTemplateRepository;
     private final MetricsQueryService metricsQueryService;
+    private final GitCommitService gitCommitService;
 
     public DeliveryQueryController(ActivityLogService activityLogService,
                                    ApplicationService applicationService,
@@ -49,7 +51,8 @@ public class DeliveryQueryController {
                                    ArtifactRepository artifactRepository,
                                    IntegrationRepository integrationRepository,
                                    PolicyTemplateRepository policyTemplateRepository,
-                                   MetricsQueryService metricsQueryService) {
+                                   MetricsQueryService metricsQueryService,
+                                   GitCommitService gitCommitService) {
         this.activityLogService = activityLogService;
         this.applicationService = applicationService;
         this.appEnvironmentRepository = appEnvironmentRepository;
@@ -57,6 +60,7 @@ public class DeliveryQueryController {
         this.integrationRepository = integrationRepository;
         this.policyTemplateRepository = policyTemplateRepository;
         this.metricsQueryService = metricsQueryService;
+        this.gitCommitService = gitCommitService;
     }
 
     /** 最近活动流（默认 30 条，上限 100）。 */
@@ -109,23 +113,57 @@ public class DeliveryQueryController {
     }
 
     /**
+     * 应用某分支的最新提交（新建发布自动关联代码）。branch 缺省用应用默认分支。
+     * 用应用自配 gitToken 读私有仓库；不含 token 明文。
+     */
+    @GetMapping("/apps/{appId}/latest-commit")
+    public ApiResponse<Map<String, Object>> latestCommit(
+            @org.springframework.web.bind.annotation.PathVariable Long appId,
+            @RequestParam(required = false) String branch) {
+        Application app = applicationService.get(appId); // 404 若不存在
+        String br = (branch != null && !branch.isBlank()) ? branch.trim() : app.getDefaultBranch();
+        Map<String, String> lc = gitCommitService.latestCommit(app.getRepoUrl(), br, app.getGitToken());
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("gitSha", lc.get("gitSha"));
+        m.put("gitBranch", lc.get("gitBranch"));
+        m.put("commitTitle", lc.get("commitTitle"));
+        m.put("imageRepo", "harbor.local/library/" + app.getCode());
+        return ApiResponse.ok(m);
+    }
+
+    /**
      * 制品登记（供流水线/页面表单注册构建产物）。
+     * gitSha 缺省时自动关联应用默认分支最新提交；imageRepo 缺省时按 harbor.local/library/<code> 生成。
      * digest 可不传：由 repo:version@sha 确定性生成（离线模式合成值，同一输入幂等）。
      * digest 唯一，重复登记同一 digest 返回 409。
      */
     @PostMapping("/artifacts")
     public ApiResponse<Artifact> registerArtifact(@RequestBody Artifact artifact) {
-        if (artifact.getAppId() == null || artifact.getVersion() == null
-                || artifact.getGitSha() == null || artifact.getImageRepo() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "appId、version、gitSha、imageRepo 不能为空");
+        if (artifact.getAppId() == null || artifact.getVersion() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "appId、version 不能为空");
+        }
+        Application app = applicationService.get(artifact.getAppId()); // 404 若应用不存在
+        // 自动关联最新提交：gitSha 缺省时用应用默认分支的远端分支头
+        if (artifact.getGitSha() == null || artifact.getGitSha().isBlank()) {
+            Map<String, String> lc = gitCommitService.latestCommit(
+                    app.getRepoUrl(),
+                    artifact.getGitBranch() != null && !artifact.getGitBranch().isBlank()
+                            ? artifact.getGitBranch() : app.getDefaultBranch(),
+                    app.getGitToken());
+            artifact.setGitSha(lc.get("gitSha"));
+            artifact.setGitBranch(lc.get("gitBranch"));
+            if (artifact.getPrTitle() == null || artifact.getPrTitle().isBlank()) {
+                artifact.setPrTitle(lc.get("commitTitle"));
+            }
+        }
+        if (artifact.getImageRepo() == null || artifact.getImageRepo().isBlank()) {
+            artifact.setImageRepo("harbor.local/library/" + app.getCode());
         }
         if (artifact.getImageDigest() == null || artifact.getImageDigest().isBlank()) {
             artifact.setImageDigest("sha256:" + sha256Hex(
                     artifact.getImageRepo() + ":" + artifact.getVersion()
                             + "@" + artifact.getGitSha()));
         }
-        applicationService.get(artifact.getAppId()); // 404 若应用不存在
         try {
             return ApiResponse.ok(artifactRepository.save(artifact));
         } catch (org.springframework.dao.DataIntegrityViolationException e) {

@@ -65,6 +65,8 @@ public class ApplicationService {
         app.setCode(code);
         app.setTeam(req.getTeam());
         app.setRepoUrl(req.getRepoUrl().trim());
+        app.setGitToken(req.getGitToken() != null && !req.getGitToken().isBlank()
+                ? req.getGitToken().trim() : null);
         app.setRepoProvider(normalizeProvider(req.getRepoProvider()));
         app.setDefaultBranch(req.getDefaultBranch() != null && !req.getDefaultBranch().isBlank()
                 ? req.getDefaultBranch().trim() : "main");

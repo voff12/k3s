@@ -140,9 +140,10 @@
                 <div class="field"><label for="releaseApp">应用 <span style="color:#cf4b45">*</span></label><select class="input" id="releaseApp" onchange="loadArtifacts()"><option value="">请选择应用</option></select></div>
                 <div class="field"><label>可发布制品 <span style="color:#cf4b45">*</span></label><div id="artifactChoices" class="choice-list"><div class="field-help">请先选择应用</div></div><button class="btn" id="toggleArtifactForm" onclick="toggleArtifactForm()">＋ 登记新制品</button>
                   <div id="artifactForm" style="display:none;margin-top:10px;border:1px solid var(--line);border-radius:9px;padding:13px">
-                    <div class="field-row"><div class="field"><label for="artVersion">版本号 <span style="color:#cf4b45">*</span></label><input class="input" id="artVersion" placeholder="v2.8.0"/></div><div class="field"><label for="artBranch">Git 分支</label><input class="input" id="artBranch" value="main"/></div></div>
-                    <div class="field-row"><div class="field"><label for="artSha">Git SHA <span style="color:#cf4b45">*</span></label><input class="input" id="artSha" placeholder="40 位 commit SHA"/></div><div class="field"><label for="artRepo">镜像仓库 <span style="color:#cf4b45">*</span></label><input class="input" id="artRepo" placeholder="harbor.local/library/xxx-service"/></div></div>
-                    <div class="field"><label for="artTitle">变更摘要（可选）</label><input class="input" id="artTitle" placeholder="PR 标题或变更说明"/></div>
+                    <div id="latestCommitHint" class="field-help" style="margin-bottom:8px">选择应用后自动关联最新提交…</div>
+                    <div class="field-row"><div class="field"><label for="artVersion">版本号 <span style="color:#cf4b45">*</span></label><input class="input" id="artVersion" placeholder="留空自动生成 v<时间戳>"/></div><div class="field"><label for="artBranch">Git 分支</label><input class="input" id="artBranch" value="main" onchange="prefillLatestCommit()"/></div></div>
+                    <div class="field-row"><div class="field"><label for="artSha">Git SHA <span style="color:#cf4b45">*</span></label><input class="input" id="artSha" placeholder="自动回填最新提交，可改"/><button type="button" class="btn" style="margin-top:6px" onclick="prefillLatestCommit(true)">↻ 重新拉取最新提交</button></div><div class="field"><label for="artRepo">镜像仓库 <span style="color:#cf4b45">*</span></label><input class="input" id="artRepo" placeholder="自动按 harbor.local/library/<应用标识> 生成"/></div></div>
+                    <div class="field"><label for="artTitle">变更摘要（可选）</label><input class="input" id="artTitle" placeholder="自动取提交标题，可改"/></div>
                     <div class="wizard-actions" style="margin-top:8px"><span class="field-help" style="align-self:center">digest 将由镜像引用自动生成（构建成功后回填真实值）</span><div class="wizard-actions-right"><button class="btn btn-primary" onclick="registerArtifactFromForm(this)">登记制品</button></div></div>
                   </div>
                 </div>
@@ -261,7 +262,7 @@
       box.innerHTML=rows.map(r=>'<div class="quality-item"><div><b>'+esc(r[0])+'</b><small>Prometheus 即时查询</small></div><div class="quality-metric">'+esc(r[1])+(r[2]?'<small>'+pill(r[2][0],r[2][1])+'</small>':'')+'</div></div>').join('');
     }
     async function loadPreviews(){try{const list=await fetchJson('/devops/previews');renderPreviews(list)}catch(e){renderPreviews(null)}}
-    async function loadArtifacts(){const appId=document.getElementById('releaseApp').value;const box=document.getElementById('artifactChoices');if(!appId){box.innerHTML='<div class="field-help">请先选择应用</div>';ARTIFACTS=[];return}try{ARTIFACTS=await fetchJson(API.artifacts+'?appId='+appId)}catch(e){ARTIFACTS=[];box.innerHTML='<div class="field-help">加载制品失败：'+esc(e.message)+'</div>';return}renderArtifacts()}
+    async function loadArtifacts(){const appId=document.getElementById('releaseApp').value;const box=document.getElementById('artifactChoices');if(!appId){box.innerHTML='<div class="field-help">请先选择应用</div>';ARTIFACTS=[];return}try{ARTIFACTS=await fetchJson(API.artifacts+'?appId='+appId)}catch(e){ARTIFACTS=[];box.innerHTML='<div class="field-help">加载制品失败：'+esc(e.message)+'</div>';return}renderArtifacts();prefillLatestCommit()}
     function refreshAll(){loadApps();loadReleases();loadActivities();loadCluster();loadPreviews()}
 
     // ===== 发布状态/阶段映射 =====
@@ -412,14 +413,30 @@
     }
 
     // ===== 制品选择 =====
-    function toggleArtifactForm(){const f=document.getElementById('artifactForm');f.style.display=f.style.display==='none'?'block':'none'}
+    function toggleArtifactForm(){const f=document.getElementById('artifactForm');f.style.display=f.style.display==='none'?'block':'none';if(f.style.display==='block')prefillLatestCommit()}
+    // 选应用/分支后自动拉最新提交，回填 SHA/镜像仓库/变更摘要（仍可手改）
+    async function prefillLatestCommit(manual){
+      const appId=document.getElementById('releaseApp').value;const hint=document.getElementById('latestCommitHint');
+      if(!appId){if(hint)hint.textContent='请先选择应用';return}
+      const branch=document.getElementById('artBranch').value.trim()||'main';
+      if(hint)hint.textContent='正在拉取 '+branch+' 最新提交…';
+      try{
+        const lc=await fetchJson('/api/delivery/apps/'+appId+'/latest-commit?branch='+encodeURIComponent(branch));
+        document.getElementById('artSha').value=lc.gitSha||'';
+        document.getElementById('artRepo').value=lc.imageRepo||'';
+        const t=document.getElementById('artTitle');if(!t.value.trim()||manual)t.value=lc.commitTitle||'';
+        const v=document.getElementById('artVersion');if(!v.value.trim())v.value='v'+new Date().toISOString().slice(0,10).replace(/-/g,'')+'-'+String(lc.gitSha||'').substring(0,7);
+        if(hint)hint.textContent='✓ 已关联最新提交 '+String(lc.gitSha||'').substring(0,7)+' · '+branch+(lc.commitTitle?' · '+lc.commitTitle:'');
+      }catch(e){if(hint)hint.textContent='⚠ 拉取最新提交失败（可手动填写）：'+e.message}
+    }
     async function registerArtifactFromForm(btn){
       const appId=document.getElementById('releaseApp').value;
       if(!appId){toast('请先选择应用');return}
-      const version=document.getElementById('artVersion').value.trim();
+      let version=document.getElementById('artVersion').value.trim();
       const sha=document.getElementById('artSha').value.trim();
       const repo=document.getElementById('artRepo').value.trim();
-      if(!version||!sha||!repo){toast('版本号、Git SHA、镜像仓库为必填');return}
+      if(!version){version='v'+new Date().toISOString().slice(0,10).replace(/-/g,'');document.getElementById('artVersion').value=version;}
+      if(!sha){toast('请等待最新提交回填或手动填写 Git SHA');return}
       const orig=btn.textContent;btn.disabled=true;btn.textContent='登记中…';
       try{
         // digest 由后端按 repo:version@sha 确定性生成（不依赖浏览器 crypto，HTTP 访问也可用）
@@ -446,7 +463,7 @@
       if(!confirm('确认停用应用「'+name+'」？停用后不再出现在应用目录。'))return;
       try{await apiJson(API.applications+'/'+id,{method:'DELETE'});toast('已停用 '+name);loadApps()}catch(e){toast('停用失败：'+e.message)}
     }
-    // ===== 执行发布（触发 Kaniko 流水线，阶段异步推进） =====
+    // ===== 执行发布（触发 BuildKit 流水线，阶段异步推进） =====
     async function executeRelease(id,btn){
       if(btn){btn.disabled=true;btn.textContent='触发中…'}
       try{

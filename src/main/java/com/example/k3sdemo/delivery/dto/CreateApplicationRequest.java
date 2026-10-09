@@ -11,6 +11,8 @@ public class CreateApplicationRequest {
     private String code;
     private String team;
     private String repoUrl;
+    /** 私有仓库访问 token（各应用自配），登记制品自动关联最新提交时用 */
+    private String gitToken;
     private String repoProvider;
     private String defaultBranch;
     private String runtimeType;
@@ -32,6 +34,8 @@ public class CreateApplicationRequest {
     public void setTeam(String team) { this.team = team; }
     public String getRepoUrl() { return repoUrl; }
     public void setRepoUrl(String repoUrl) { this.repoUrl = repoUrl; }
+    public String getGitToken() { return gitToken; }
+    public void setGitToken(String gitToken) { this.gitToken = gitToken; }
     public String getRepoProvider() { return repoProvider; }
     public void setRepoProvider(String repoProvider) { this.repoProvider = repoProvider; }
     public String getDefaultBranch() { return defaultBranch; }
