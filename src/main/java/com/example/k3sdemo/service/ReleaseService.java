@@ -153,11 +153,14 @@ public class ReleaseService {
 
             record.addLog("[INFO] 工作区缓存 PVC: " + DevOpsService.workspacePvcName(config.getGitUrl())
                     + " (同仓库增量 clone, 二次构建仅 fetch 增量)");
+            record.addLog("[INFO] BuildKit 缓存 PVC: " + DevOpsService.BUILDKIT_CACHE_PVC_NAME
+                    + " (跨构建复用基础镜像层, 二次构建免重拉基础镜像)");
             broadcastLog(record);
 
             Job releaseJob = buildReleaseJob(jobName, record.getId(), config, fullImage);
             try {
                 DevOpsService.ensureWorkspacePvc(client, DevOpsService.workspacePvcName(config.getGitUrl()));
+                DevOpsService.ensureBuildkitCachePvc(client);
                 client.batch().v1().jobs().inNamespace("default").resource(releaseJob).create();
             } catch (KubernetesClientException e) {
                 int code = e.getCode();
@@ -167,6 +170,7 @@ public class ReleaseService {
                     cleanupJob(client, jobName);
                     Thread.sleep(3000);
                     DevOpsService.ensureWorkspacePvc(client, DevOpsService.workspacePvcName(config.getGitUrl()));
+                    DevOpsService.ensureBuildkitCachePvc(client);
                     client.batch().v1().jobs().inNamespace("default").resource(releaseJob).create();
                 } else {
                     String hint = code == -1
@@ -569,6 +573,7 @@ public class ReleaseService {
                 // 使用生成的 Dockerfile.release (runtime-only), 直接打包 JAR
                 // rootless daemonless: buildctl-daemonless.sh 单容器起临时 daemon,
                 // --output type=image,push=true 直接推 Harbor; buildkitd.toml 声明 insecure registry
+                // buildkit-state 卷挂共享 buildkit-cache-pvc, 跨 Job 复用基础镜像层 (rootless $HOME=/home/user)
                 .addNewInitContainer()
                 .withName("buildkit-build")
                 .withImage(buildkitImage)
@@ -576,6 +581,12 @@ public class ReleaseService {
                 .withCommand("sh", "-c")
                 .withArgs("set -e; "
                         + "mkdir -p $HOME/.docker $HOME/.config/buildkit; "
+                        + "mkdir -p $HOME/.local/share/buildkit; "
+                        + "if [ -d $HOME/.local/share/buildkit/blobs ]; then "
+                        + "  echo '[INFO] BuildKit 缓存目录已存在, 基础镜像层将复用 (跳过重新拉取)'; "
+                        + "else "
+                        + "  echo '[INFO] BuildKit 缓存目录为空, 首次构建将拉取基础镜像层'; "
+                        + "fi; "
                         + "cp /docker-config/config.json $HOME/.docker/config.json 2>/dev/null || true; "
                         + "printf '[registry.\"%s\"]\\n  http = true\\n  insecure = true\\n' \"" + harborHost
                         + "\" > $HOME/.config/buildkit/buildkitd.toml; "
@@ -615,6 +626,10 @@ public class ReleaseService {
                 .withName("docker-config")
                 .withMountPath("/docker-config")
                 .endVolumeMount()
+                .addNewVolumeMount()
+                .withName("buildkit-state")
+                .withMountPath("/home/user/.local/share/buildkit")
+                .endVolumeMount()
                 .endInitContainer()
 
                 // ===== Main Container: Deployer (kubectl) =====
@@ -641,6 +656,12 @@ public class ReleaseService {
                 .addNewVolume()
                 .withName("docker-config")
                 .withNewEmptyDir().endEmptyDir()
+                .endVolume()
+                .addNewVolume()
+                .withName("buildkit-state")
+                .withNewPersistentVolumeClaim()
+                .withClaimName(DevOpsService.BUILDKIT_CACHE_PVC_NAME)
+                .endPersistentVolumeClaim()
                 .endVolume()
                 .endSpec()
                 .endTemplate()
