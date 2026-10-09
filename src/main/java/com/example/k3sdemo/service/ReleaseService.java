@@ -374,7 +374,11 @@ public class ReleaseService {
         }
 
         // Maven 构建命令
-        String buildCmd = config.hasBuildStep() ? config.getBuildCommand() : "mvn clean package -DskipTests";
+        // 阿里云镜像源注入: 用户命令(含 UI 默认值)以 mvn 开头且未自带 -s 时, 统一插入 -s 指向镜像源配置
+        String rawBuildCmd = config.hasBuildStep() ? config.getBuildCommand() : "mvn clean package -DskipTests";
+        String buildCmd = (rawBuildCmd.startsWith("mvn") && !rawBuildCmd.contains("-s "))
+                ? "mvn -s /tmp/m2/settings.xml " + rawBuildCmd.substring("mvn".length()).trim()
+                : rawBuildCmd;
 
         // Dockerfile 不再使用用户原始路径, 而是由 build 容器自动生成 Dockerfile.release
 
@@ -496,6 +500,12 @@ public class ReleaseService {
         String dockerIgnoreB64 = b64(PY_DOCKERIGNORE);
 
         buildCmdBuilder.append("cd /workspace && ");
+        // 阿里云 Maven 镜像源 (对齐 DevOpsService): 写 /tmp/m2/settings.xml, 默认 buildCmd 已带 -s 引用。
+        // settings.xml 不能放 /root/.m2 (maven-repo-pvc 挂载点, 会被依赖缓存混写), 故独立放 /tmp。
+        String mavenSettings = "<settings><mirrors><mirror><id>aliyun</id><mirrorOf>*</mirrorOf>"
+                + "<url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>";
+        buildCmdBuilder.append("mkdir -p /tmp/m2 && echo '").append(mavenSettings)
+                .append("' > /tmp/m2/settings.xml && ");
         // 写 Harbor 认证(BuildKit 推送用),始终执行 — Python/dockerfile 模式 build 容器不跑 mvn, 但此步必须保留
         buildCmdBuilder.append("mkdir -p /docker-config && echo '").append(dockerConfigBase64)
                 .append("' | base64 -d > /docker-config/config.json && echo '[INFO] ✓ Harbor 认证已写入' && ");
