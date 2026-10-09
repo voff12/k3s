@@ -56,6 +56,9 @@ public class ReleaseService {
     @Value("${buildkit.image:moby/buildkit:v0.25.1-rootless}")
     private String buildkitImage;
 
+    @Value("${buildkit.memory-limit:4Gi}")
+    private String buildkitMemoryLimit;
+
     @Value("${git.image:alpine:3.19}")
     private String gitImage;
 
@@ -632,7 +635,7 @@ public class ReleaseService {
                 .addToRequests("cpu", new Quantity("500m"))
                 .addToRequests("memory", new Quantity("1Gi"))
                 .addToLimits("cpu", new Quantity("2"))
-                .addToLimits("memory", new Quantity("4Gi"))
+                .addToLimits("memory", new Quantity(buildkitMemoryLimit))
                 .endResources()
                 .addNewVolumeMount()
                 .withName("workspace")
