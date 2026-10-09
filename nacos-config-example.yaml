@@ -55,7 +55,9 @@ kaniko:
 git:
   # Git 代理（K3s Pod 无法直连 GitHub 时填，如 http://192.168.1.100:7890）
   proxy: ""
-  image: alpine:3.19
+  # 预装 git+curl 的自制工具镜像（docker/git-alpine.Dockerfile，prewarm-images.sh 构建）。
+  # 不要填裸 alpine：流水线已删除运行时 apk add，裸 alpine 里没有 git，clone 会 git: not found。
+  image: 172.16.223.135:5000/git-alpine:3.19
 maven:
   image: maven:3.9-eclipse-temurin-17
 loader:
