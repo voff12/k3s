@@ -248,12 +248,18 @@ public class ReleaseService {
 
             // 现在 Deployment 名称总是会被设置（自动或手动）
             if (jobSuccess) {
+                boolean deployed;
                 if (config.isMergeDeploy()) {
                     // 合并模式: 部署到独立预览命名空间 preview-<mergeSetId>
-                    deployToPreview(client, config, fullImage, record);
+                    deployed = deployToPreview(client, config, fullImage, record);
                 } else {
                     // Also do server-side deployment update as a fallback
-                    deployToK3s(client, config, fullImage, record);
+                    deployed = deployToK3s(client, config, fullImage, record);
+                }
+                if (!deployed) {
+                    record.fail("部署后副本未就绪, 请查看日志");
+                    broadcastStatus(record);
+                    return;
                 }
             } else {
                 diagnoseMainContainerFailure(client, jobName, record);
@@ -944,6 +950,67 @@ public class ReleaseService {
         }
     }
 
+    /** 部署后等待副本 Ready 的超时时间。 */
+    private static final long DEPLOY_READY_TIMEOUT_MS = 180_000;
+
+    /**
+     * 轮询等待 Deployment 副本 Ready（readyReplicas >= desired）。
+     * 超时、Deployment 取不到/被删或等待被中断都返回 false，并留下带原因的日志。
+     */
+    private boolean waitForDeploymentReady(KubernetesClient client, String namespace, String deployName,
+            long timeoutMillis, ReleaseRecord record) {
+        record.addLog("[INFO] 等待副本就绪: " + deployName + " (最长 " + (timeoutMillis / 1000) + "s)...");
+        broadcastLog(record);
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (true) {
+            Deployment current = null;
+            String fetchError = null;
+            try {
+                current = client.apps().deployments().inNamespace(namespace).withName(deployName).get();
+            } catch (Exception e) {
+                fetchError = e.getMessage();
+            }
+            if (isDeploymentReady(current)) {
+                record.addLog("[INFO] ✓ 副本已就绪: " + deployName + " ("
+                        + readyReplicasOf(current) + "/" + desiredReplicasOf(current) + " Ready)");
+                broadcastLog(record);
+                return true;
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                String reason = current == null
+                        ? (fetchError != null ? "Deployment 查询失败: " + fetchError : "Deployment 不存在或已被删除")
+                        : "副本 " + readyReplicasOf(current) + "/" + desiredReplicasOf(current) + " Ready 超时";
+                record.addLog("[ERROR] 副本未就绪: " + deployName + ", 原因: " + reason);
+                broadcastLog(record);
+                return false;
+            }
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                record.addLog("[ERROR] 就绪确认失败: 等待被中断");
+                broadcastLog(record);
+                return false;
+            }
+        }
+    }
+
+    /** Deployment 副本是否已 Ready（desired 缺省按 1）。 */
+    static boolean isDeploymentReady(Deployment deployment) {
+        if (deployment == null || deployment.getSpec() == null || deployment.getStatus() == null) {
+            return false;
+        }
+        return readyReplicasOf(deployment) >= desiredReplicasOf(deployment);
+    }
+
+    private static int desiredReplicasOf(Deployment deployment) {
+        return deployment.getSpec().getReplicas() != null ? deployment.getSpec().getReplicas() : 1;
+    }
+
+    private static int readyReplicasOf(Deployment deployment) {
+        return deployment.getStatus().getReadyReplicas() != null ? deployment.getStatus().getReadyReplicas() : 0;
+    }
+
     private boolean waitForJobCompletion(KubernetesClient client, String jobName, ReleaseRecord record)
             throws InterruptedException {
         for (int i = 0; i < 120; i++) {
@@ -1039,7 +1106,7 @@ public class ReleaseService {
         }
     }
 
-    private void deployToK3s(KubernetesClient client, ReleaseConfig config, String fullImage, ReleaseRecord record) {
+    private boolean deployToK3s(KubernetesClient client, ReleaseConfig config, String fullImage, ReleaseRecord record) {
         try {
             String ns = config.getNamespace();
             String deployName = config.getDeploymentName();
@@ -1097,7 +1164,7 @@ public class ReleaseService {
                 record.addLog("[INFO] ✓ Deployment 已创建: " + deployName + " (镜像: " + fullImage + ")");
                 broadcastLog(record);
                 ensureService(client, ns, deployName, config.getEffectiveAppPort(), record);
-                return;
+                return waitForDeploymentReady(client, ns, deployName, DEPLOY_READY_TIMEOUT_MS, record);
             }
 
             // 更新现有 Deployment
@@ -1120,21 +1187,11 @@ public class ReleaseService {
 
             ensureService(client, ns, deployName, config.getEffectiveAppPort(), record);
 
-            record.addLog("[INFO] 等待滚动更新...");
-            broadcastLog(record);
-            Thread.sleep(3000);
-
-            Deployment updated = client.apps().deployments()
-                    .inNamespace(ns).withName(deployName).get();
-            if (updated != null && updated.getStatus() != null) {
-                int desired = updated.getSpec().getReplicas() != null ? updated.getSpec().getReplicas() : 1;
-                int ready = updated.getStatus().getReadyReplicas() != null ? updated.getStatus().getReadyReplicas() : 0;
-                record.addLog("[INFO] 副本状态: " + ready + "/" + desired + " Ready");
-            }
-            broadcastLog(record);
+            return waitForDeploymentReady(client, ns, deployName, DEPLOY_READY_TIMEOUT_MS, record);
         } catch (Exception e) {
             record.addLog("[ERROR] 部署更新失败: " + e.getMessage());
             broadcastLog(record);
+            return false;
         }
     }
 
@@ -1142,7 +1199,7 @@ public class ReleaseService {
      * 合并预览部署 (Harbor 模式): 把推送到 Harbor 的镜像部署到独立预览命名空间 preview-&lt;mergeSetId&gt;。
      * 在预览命名空间内创建 Harbor 拉取 Secret + Deployment(imagePullSecrets) + NodePort Service。
      */
-    private void deployToPreview(KubernetesClient client, ReleaseConfig config, String fullImage,
+    private boolean deployToPreview(KubernetesClient client, ReleaseConfig config, String fullImage,
             ReleaseRecord record) {
         try {
             String previewNs = config.getPreviewNamespace();
@@ -1270,17 +1327,11 @@ public class ReleaseService {
             }
             broadcastLog(record);
 
-            Thread.sleep(3000);
-            Deployment updated = client.apps().deployments().inNamespace(previewNs).withName(appName).get();
-            if (updated != null && updated.getStatus() != null) {
-                int desiredR = updated.getSpec().getReplicas() != null ? updated.getSpec().getReplicas() : 1;
-                int ready = updated.getStatus().getReadyReplicas() != null ? updated.getStatus().getReadyReplicas() : 0;
-                record.addLog("[INFO] 预览副本状态: " + ready + "/" + desiredR + " Ready");
-            }
-            broadcastLog(record);
+            return waitForDeploymentReady(client, previewNs, appName, DEPLOY_READY_TIMEOUT_MS, record);
         } catch (Exception e) {
             record.addLog("[ERROR] 预览环境部署失败: " + e.getMessage());
             broadcastLog(record);
+            return false;
         }
     }
 
