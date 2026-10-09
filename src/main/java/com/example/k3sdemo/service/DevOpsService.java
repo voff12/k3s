@@ -50,6 +50,9 @@ public class DevOpsService {
     @Value("${git.image:alpine/git:latest}")
     private String gitImage;
 
+    /** buildkitd 状态缓存 PVC：跨 Job 复用基础镜像层，避免每次构建重拉基础镜像。 */
+    public static final String BUILDKIT_CACHE_PVC_NAME = "buildkit-cache-pvc";
+
     @Value("${maven.image:maven:3.9-eclipse-temurin-17}")
     private String mavenImage;
 
@@ -178,6 +181,7 @@ public class DevOpsService {
             Job buildkitJob = buildBuildkitJob(jobName, run.getId(), config, fullImage);
             try {
                 ensureWorkspacePvc(client, workspacePvcName(config.getGitUrl()));
+                ensureBuildkitCachePvc(client);
                 client.batch().v1().jobs().inNamespace("default").resource(buildkitJob).create();
             } catch (KubernetesClientException e) {
                 int code = e.getCode();
@@ -188,6 +192,7 @@ public class DevOpsService {
                     cleanupJob(client, jobName);
                     Thread.sleep(3000);
                     ensureWorkspacePvc(client, workspacePvcName(config.getGitUrl()));
+                    ensureBuildkitCachePvc(client);
                     client.batch().v1().jobs().inNamespace("default").resource(buildkitJob).create();
                 } else if (code == 403) {
                     run.fail("权限不足 (403 Forbidden): " + e.getMessage() + "\n请检查 ServiceAccount 权限");
@@ -1025,14 +1030,16 @@ public class DevOpsService {
     private String buildJavaDockerfile(String fromPrefix, String buildCmd) {
         String settings = "<settings><mirrors><mirror><id>aliyun</id><mirrorOf>*</mirrorOf>"
                 + "<url>https://maven.aliyun.com/repository/public</url></mirror></mirrors></settings>";
+        // settings.xml 不能放 cache mount(target=/root/.m2 会被覆盖), 写到 /tmp 后用 -s 引用
         return "FROM " + fromPrefix + "/library/maven:3.9-eclipse-temurin-17 AS builder\n"
                 + "WORKDIR /build\n"
                 + "COPY . .\n"
-                // 依赖分层: settings 写入后先单独跑 dependency:go-offline, 该层只依赖 pom.xml,
-                // 可被 BuildKit registry cache 复用; 源码改动不再触发全量依赖下载
-                + "RUN mkdir -p /root/.m2 && echo '" + settings + "' > /root/.m2/settings.xml && "
-                + "(mvn -q dependency:go-offline || echo '[WARN] go-offline 未完全成功, 构建阶段将按需下载')\n"
-                + "RUN " + buildCmd + "\n"
+                // 依赖缓存: cache mount 持久化 /root/.m2, 跨构建复用已下载依赖;
+                // 离线 daemonless 模式下该 mount 数据落在 buildkitd 状态目录(已挂 buildkit-cache-pvc)
+                + "RUN mkdir -p /tmp/m2 && echo '" + settings + "' > /tmp/m2/settings.xml\n"
+                + "RUN --mount=type=cache,target=/root/.m2 mvn -s /tmp/m2/settings.xml -q dependency:go-offline"
+                + " || echo '[WARN] go-offline 未完全成功, 构建阶段将按需下载'\n"
+                + "RUN --mount=type=cache,target=/root/.m2 mvn -s /tmp/m2/settings.xml " + buildCmd + "\n"
                 + "\n"
                 + "FROM " + fromPrefix + "/library/eclipse-temurin:17-jre-jammy\n"
                 + "WORKDIR /app\n"
@@ -1276,6 +1283,12 @@ public class DevOpsService {
         String cacheRef = harborHost + "/" + harborProject + "/buildkit-cache";
         String buildkitCmd = "set -e; "
                 + "mkdir -p $HOME/.docker $HOME/.config/buildkit; "
+                + "mkdir -p $HOME/.local/share/buildkit; "
+                + "if [ -d $HOME/.local/share/buildkit/blobs ]; then "
+                + "  echo '[INFO] BuildKit 缓存目录已存在, 基础镜像层将复用 (跳过重新拉取)'; "
+                + "else "
+                + "  echo '[INFO] BuildKit 缓存目录为空, 首次构建将拉取基础镜像层'; "
+                + "fi; "
                 + "cp /docker-config/config.json $HOME/.docker/config.json 2>/dev/null || true; "
                 + "printf '[registry.\"%s\"]\\n  http = true\\n  insecure = true\\n' \"" + harborHost
                 + "\" > $HOME/.config/buildkit/buildkitd.toml; "
@@ -1324,6 +1337,10 @@ public class DevOpsService {
                 .withName("workspace")
                 .withMountPath("/workspace")
                 .endVolumeMount()
+                .addNewVolumeMount()
+                .withName("buildkit-state")
+                .withMountPath("/home/user/.local/share/buildkit")
+                .endVolumeMount()
                 .endInitContainer();
 
         // ... (existing code)
@@ -1367,6 +1384,12 @@ public class DevOpsService {
                 .endPersistentVolumeClaim()
                 .endVolume()
                 .addNewVolume()
+                .withName("buildkit-state")
+                .withNewPersistentVolumeClaim()
+                .withClaimName(BUILDKIT_CACHE_PVC_NAME)
+                .endPersistentVolumeClaim()
+                .endVolume()
+                .addNewVolume()
                 .withName("k3s-sock")
                 .withNewHostPath()
                 .withPath("/run/k3s/containerd/containerd.sock")
@@ -1374,6 +1397,33 @@ public class DevOpsService {
                 .endVolume()
                 .endSpec()
                 .endTemplate()
+                .endSpec()
+                .build();
+    }
+
+    /** 确保 buildkitd 状态缓存 PVC 存在 (不存在则创建), 供跨 Job 复用基础镜像层。 */
+    public static void ensureBuildkitCachePvc(KubernetesClient client) {
+        if (client.persistentVolumeClaims().inNamespace("default").withName(BUILDKIT_CACHE_PVC_NAME).get() != null) {
+            return; // 已存在
+        }
+        try {
+            client.persistentVolumeClaims().inNamespace("default").resource(buildBuildkitCachePvc()).create();
+        } catch (KubernetesClientException conflict) {
+            if (conflict.getCode() != 409) {
+                throw conflict; // 并发创建撞名则视为已存在
+            }
+        }
+    }
+
+    /** 构造 buildkit 缓存 PVC 对象 (10Gi / RWO / default ns)。提取为纯函数便于测试。 */
+    public static PersistentVolumeClaim buildBuildkitCachePvc() {
+        return new PersistentVolumeClaimBuilder()
+                .withNewMetadata().withName(BUILDKIT_CACHE_PVC_NAME).withNamespace("default").endMetadata()
+                .withNewSpec()
+                .withAccessModes("ReadWriteOnce")
+                .withNewResources()
+                .addToRequests("storage", new Quantity("10Gi"))
+                .endResources()
                 .endSpec()
                 .build();
     }
