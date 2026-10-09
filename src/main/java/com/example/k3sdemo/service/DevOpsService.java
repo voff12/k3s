@@ -797,6 +797,10 @@ public class DevOpsService {
             client.apps().deployments().inNamespace(ns).resource(deployment).update();
             run.addLog("[INFO] ✓ Deployment 已更新: " + deployName + " -> " + fullImage);
 
+            // 确保应用有 NodePort Service 可对外访问 (对齐 ReleaseService.ensureService:
+            // Deployment 存在但 Service 缺失时补建, 已存在则不动)
+            ensureService(client, ns, deployName, config.getEffectiveAppPort(), run);
+
             // Wait for rollout
             run.addLog("[INFO] 等待滚动更新完成...");
             broadcastLog(run);
@@ -814,6 +818,45 @@ public class DevOpsService {
 
         } catch (Exception e) {
             run.addLog("[ERROR] 部署失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 确保 Deployment 有对应的 NodePort Service (对齐 ReleaseService.ensureService)。
+     * Deployment 的 label 为 app=&lt;deployName&gt; 时按同名同 selector 补建; 已存在则不动。
+     */
+    private void ensureService(KubernetesClient client, String namespace, String deployName, int appPort, PipelineRun run) {
+        try {
+            io.fabric8.kubernetes.api.model.Service existing = client.services().inNamespace(namespace).withName(deployName).get();
+            if (existing == null) {
+                io.fabric8.kubernetes.api.model.Service svc = new io.fabric8.kubernetes.api.model.ServiceBuilder()
+                        .withNewMetadata()
+                        .withName(deployName)
+                        .withNamespace(namespace)
+                        .addToLabels("app", deployName)
+                        .endMetadata()
+                        .withNewSpec()
+                        .withType("NodePort")
+                        .addToSelector("app", deployName)
+                        .addNewPort()
+                        .withName("http")
+                        .withProtocol("TCP")
+                        .withPort(appPort)
+                        .withNewTargetPort(appPort)
+                        .endPort()
+                        .endSpec()
+                        .build();
+                client.services().inNamespace(namespace).resource(svc).create();
+                io.fabric8.kubernetes.api.model.Service created = client.services().inNamespace(namespace).withName(deployName).get();
+                Integer nodePort = created != null && created.getSpec() != null && !created.getSpec().getPorts().isEmpty()
+                        ? created.getSpec().getPorts().get(0).getNodePort() : null;
+                run.addLog("[INFO] ✓ Service 已创建: " + deployName + " (NodePort: "
+                        + (nodePort != null ? nodePort : "自动分配") + ", 访问: http://节点IP:" + (nodePort != null ? nodePort : "NodePort") + ")");
+                broadcastLog(run);
+            }
+        } catch (Exception e) {
+            run.addLog("[WARN] Service 创建/检查失败: " + e.getMessage());
+            broadcastLog(run);
         }
     }
 
