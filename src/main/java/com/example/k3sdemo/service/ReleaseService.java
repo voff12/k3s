@@ -366,9 +366,9 @@ public class ReleaseService {
         // Maven 构建命令
         String buildCmd = config.hasBuildStep() ? config.getBuildCommand() : "mvn clean package -DskipTests";
 
-        // Dockerfile 不再使用用户原始路径, 而是由 prepare-kaniko 容器自动生成 Dockerfile.release
+        // Dockerfile 不再使用用户原始路径, 而是由 build 容器自动生成 Dockerfile.release
 
-        // Kaniko 参数现在直接通过 withArgs 传递, 不再需要构建命令字符串
+        // BuildKit 参数现在直接通过 withArgs 传递, 不再需要构建命令字符串
 
         // Deployer 命令: 使用 kubectl 更新或创建 Deployment
         // 注意：动态获取容器名，兼容 hello / hello-container 等不同命名
@@ -396,8 +396,8 @@ public class ReleaseService {
                 deployName, ns);
         }
 
-        // 构建 Harbor docker config for Kaniko authentication
-        // Kaniko 需要 base64 编码的 auth 字段: base64(username:password)
+        // 构建 Harbor docker config for BuildKit authentication
+        // BuildKit 推送需要 base64 编码的 auth 字段: base64(username:password)
         String authString = harborUsername + ":" + harborPassword;
         String authBase64 = Base64.getEncoder().encodeToString(authString.getBytes());
         String dockerConfigJson = String.format(
@@ -474,7 +474,7 @@ public class ReleaseService {
         String dockerIgnoreB64 = b64(PY_DOCKERIGNORE);
 
         buildCmdBuilder.append("cd /workspace && ");
-        // 写 Harbor 认证(kaniko 推送用),始终执行 — Python/dockerfile 模式 build 容器不跑 mvn, 但此步必须保留
+        // 写 Harbor 认证(BuildKit 推送用),始终执行 — Python/dockerfile 模式 build 容器不跑 mvn, 但此步必须保留
         buildCmdBuilder.append("mkdir -p /docker-config && echo '").append(dockerConfigBase64)
                 .append("' | base64 -d > /docker-config/config.json && echo '[INFO] ✓ Harbor 认证已写入' && ");
         buildCmdBuilder.append("RUNTIME='").append(runtime).append("' && REQ_PATH='").append(reqPath)
@@ -671,7 +671,7 @@ public class ReleaseService {
             String containerName, ReleaseRecord record) {
         try {
             int lastLineCount = 0;
-            for (int i = 0; i < 360; i++) { // up to 30 min
+            for (int i = 0; i < 1080; i++) { // up to 90 min: BuildKit 冷缓存首次推 mode=max 全量缓存层到 Harbor 较慢
                 Pod pod = client.pods().inNamespace("default").withName(podName).get();
                 if (pod == null)
                     return false;
@@ -746,7 +746,7 @@ public class ReleaseService {
 
                 Thread.sleep(5000);
             }
-            record.addLog("[ERROR] " + containerName + " 执行超时 (30分钟)");
+            record.addLog("[ERROR] " + containerName + " 执行超时 (90分钟)");
             broadcastLog(record);
             return false;
         } catch (Exception e) {
@@ -1482,11 +1482,11 @@ public class ReleaseService {
 
     @Scheduled(fixedRate = 60000)
     public void sweepStaleReleases() {
-        LocalDateTime cutoff = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(90);
         for (Map.Entry<String, ReleaseRecord> entry : releases.entrySet()) {
             ReleaseRecord record = entry.getValue();
             if (!record.isFinished() && record.getLastActivityTime().isBefore(cutoff)) {
-                record.addLog("[WARN] 发布超过 30 分钟无活动, 强制终止");
+                record.addLog("[WARN] 发布超过 90 分钟无活动, 强制终止");
                 record.fail("超时被系统终止");
                 broadcastStatus(record);
                 broadcastLog(record);

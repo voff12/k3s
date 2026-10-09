@@ -9,15 +9,15 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Kaniko 触发器：把交付中心的发布请求转成现有 DevOpsService 流水线。
+ * BuildKit 触发器：把交付中心的发布请求转成现有 DevOpsService 流水线。
  * 离线模式与 build.sh 等价（集群内构建 + 导入 containerd + 更新 Deployment）。
  */
 @Component
-public class KanikoPipelineTrigger implements PipelineTrigger {
+public class BuildKitPipelineTrigger implements PipelineTrigger {
 
     private final DevOpsService devOpsService;
 
-    public KanikoPipelineTrigger(DevOpsService devOpsService) {
+    public BuildKitPipelineTrigger(DevOpsService devOpsService) {
         this.devOpsService = devOpsService;
     }
 

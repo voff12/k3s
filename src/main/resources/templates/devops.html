@@ -149,7 +149,7 @@
             <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 shrink-0">
                 <div class="flex items-center gap-4">
                     <h1 class="text-lg font-bold text-slate-900">CI/CD 流水线</h1>
-                    <span class="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">K3s + Kaniko (离线模式)</span>
+                    <span class="text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">K3s + BuildKit (离线模式)</span>
                 </div>
                 <div class="flex items-center gap-3">
                     <button onclick="refreshPipelines()"
@@ -355,7 +355,7 @@
                                     <div class="space-y-2">
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">构建引擎</span>
-                                            <span class="font-mono font-medium text-slate-700">Kaniko in K3s Job</span>
+                                            <span class="font-mono font-medium text-slate-700">BuildKit in K3s Job</span>
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">镜像存储</span>
@@ -760,7 +760,7 @@
                 <div class="flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                     <span class="material-symbols-outlined text-primary text-lg mt-0.5">info</span>
                     <p class="text-xs text-blue-700 leading-relaxed" id="flowHint">
-                        流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、构建镜像并直接导入 K3s 节点 (不依赖外网)。
+                        流水线通过 K3s Job 启动 BuildKit 容器，自动克隆代码、构建镜像并直接导入 K3s 节点 (不依赖外网)。
                         如果指定了 Deployment 名称，还会自动更新 K3s 集群中的部署。
                     </p>
                 </div>
@@ -810,9 +810,9 @@
             const hint = document.getElementById('flowHint');
             if (hint) {
                 hint.textContent = isPy
-                    ? ('流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、pip 安装(' + document.getElementById('formPythonServer').value
+                    ? ('流水线通过 K3s Job 启动 BuildKit 容器，自动克隆代码、pip 安装(' + document.getElementById('formPythonServer').value
                         + ')并构建镜像、直接导入 K3s 节点 (不依赖外网)。如果指定了 Deployment 名称，还会自动更新部署。')
-                    : '流水线通过 K3s Job 启动 Kaniko 容器，自动克隆代码、构建镜像并直接导入 K3s 节点 (不依赖外网)。如果指定了 Deployment 名称，还会自动更新 K3s 集群中的部署。';
+                    : '流水线通过 K3s Job 启动 BuildKit 容器，自动克隆代码、构建镜像并直接导入 K3s 节点 (不依赖外网)。如果指定了 Deployment 名称，还会自动更新 K3s 集群中的部署。';
             }
         }
 

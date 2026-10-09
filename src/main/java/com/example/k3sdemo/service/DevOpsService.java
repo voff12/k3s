@@ -23,7 +23,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 /**
- * Core DevOps service: orchestrates CI/CD via K3s Job (Kaniko) + Harbor +
+ * Core DevOps service: orchestrates CI/CD via K3s Job (BuildKit) + Harbor +
  * kubectl deploy.
  */
 @Service
@@ -151,7 +151,7 @@ public class DevOpsService {
     private void executePipeline(PipelineRun run) {
         PipelineConfig config = run.getConfig();
         String fullImage = config.getFullImageRef(harborHost, harborProject);
-        String jobName = "kaniko-" + run.getId();
+        String jobName = "buildkit-" + run.getId();
 
         try (KubernetesClient client = new KubernetesClientBuilder().build()) {
 
@@ -175,10 +175,10 @@ public class DevOpsService {
             broadcastLog(run);
 
             // ── Layer 1: API 提交防御 ──
-            Job kanikoJob = buildKanikoJob(jobName, run.getId(), config, fullImage);
+            Job buildkitJob = buildBuildkitJob(jobName, run.getId(), config, fullImage);
             try {
                 ensureWorkspacePvc(client, workspacePvcName(config.getGitUrl()));
-                client.batch().v1().jobs().inNamespace("default").resource(kanikoJob).create();
+                client.batch().v1().jobs().inNamespace("default").resource(buildkitJob).create();
             } catch (KubernetesClientException e) {
                 int code = e.getCode();
                 if (code == 409) {
@@ -188,7 +188,7 @@ public class DevOpsService {
                     cleanupJob(client, jobName);
                     Thread.sleep(3000);
                     ensureWorkspacePvc(client, workspacePvcName(config.getGitUrl()));
-                    client.batch().v1().jobs().inNamespace("default").resource(kanikoJob).create();
+                    client.batch().v1().jobs().inNamespace("default").resource(buildkitJob).create();
                 } else if (code == 403) {
                     run.fail("权限不足 (403 Forbidden): " + e.getMessage() + "\n请检查 ServiceAccount 权限");
                     broadcastStatus(run);
@@ -271,8 +271,8 @@ public class DevOpsService {
             }
 
             // 2b: Wait for buildkit init container (执行多阶段构建)
-            boolean kanikoOk = waitForInitContainerAndStreamLogs(client, podName, "buildkit", run);
-            if (!kanikoOk) {
+            boolean buildkitOk = waitForInitContainerAndStreamLogs(client, podName, "buildkit", run);
+            if (!buildkitOk) {
                 diagnoseMainContainerFailure(client, jobName, run);
                 run.fail("BuildKit 构建失败，请查看日志");
                 broadcastStatus(run);
@@ -395,7 +395,7 @@ public class DevOpsService {
             String containerName, PipelineRun run) {
         try {
             int lastLineCount = 0;
-            for (int i = 0; i < 360; i++) { // up to 30 min
+            for (int i = 0; i < 1080; i++) { // up to 90 min: BuildKit 冷缓存首次推 mode=max 全量缓存层到 Harbor 较慢
                 Pod pod = client.pods().inNamespace("default").withName(podName).get();
                 if (pod == null)
                     return false;
@@ -485,7 +485,7 @@ public class DevOpsService {
 
                 Thread.sleep(5000);
             }
-            run.addLog("[ERROR] " + containerName + " 执行超时 (30分钟)");
+            run.addLog("[ERROR] " + containerName + " 执行超时 (90分钟)");
             broadcastLog(run);
             return false;
         } catch (Exception e) {
@@ -642,7 +642,7 @@ public class DevOpsService {
             String containerName, PipelineRun run) {
         try {
             int lastLineCount = 0;
-            for (int i = 0; i < 360; i++) { // up to 30 min
+            for (int i = 0; i < 1080; i++) { // up to 90 min: BuildKit 冷缓存首次推 mode=max 全量缓存层到 Harbor 较慢
                 Pod pod = client.pods().inNamespace(namespace).withName(podName).get();
                 if (pod == null)
                     return;
@@ -718,7 +718,7 @@ public class DevOpsService {
                     return true;
                 }
                 if (jobStatus.getFailed() != null && jobStatus.getFailed() > 0) {
-                    // Try to diagnose kaniko container exit code
+                    // Try to diagnose buildkit container exit code
                     diagnoseMainContainerFailure(client, jobName, run);
                     return false;
                 }
@@ -1077,12 +1077,12 @@ public class DevOpsService {
     }
 
     /**
-     * Build the Kaniko Job spec.
-     * Init containers: registry-check → git-clone → rewrite-dockerfile → kaniko
+     * Build the BuildKit Job spec.
+     * Init containers: registry-check → git-clone → rewrite-dockerfile → buildkit
      * Main container: loader (import tar to K3s containerd)
-     * Maven 打包通过多阶段 Dockerfile 在 Kaniko 内完成，不再需要单独的 maven-build 容器。
+     * Maven 打包通过多阶段 Dockerfile 在 BuildKit 内完成，不再需要单独的 maven-build 容器。
      */
-    private Job buildKanikoJob(String jobName, String pipelineId, PipelineConfig config, String fullImage) {
+    private Job buildBuildkitJob(String jobName, String pipelineId, PipelineConfig config, String fullImage) {
         // Build git clone command
         String cloneUrl;
         if (config.hasGitAuth()) {
@@ -1113,7 +1113,7 @@ public class DevOpsService {
             cloneCmdBuilder.append("git config --global https.proxy ").append(config.getGitProxy()).append(" && ");
             cloneCmdBuilder.append("echo '[INFO] 已配置 Git 代理: ").append(config.getGitProxy()).append("' && ");
         }
-        // ===== 增量 clone: 同仓库 workspace 挂在按 gitUrl 哈希派生的 PVC 上 (见 buildKanikoJob Volumes),
+        // ===== 增量 clone: 同仓库 workspace 挂在按 gitUrl 哈希派生的 PVC 上 (见 buildBuildkitJob Volumes),
         // 已存在则 fetch + reset --hard + clean (首次全量 clone 是一次性成本) =====
         String base = config.isMergeDeploy() ? config.getEffectiveBaseBranch() : config.getBranch();
         String ensureRepo = String.format(
@@ -1410,7 +1410,7 @@ public class DevOpsService {
     }
 
     /**
-     * Cleanup completed Kaniko Job.
+     * Cleanup completed BuildKit Job.
      */
     private void cleanupJob(KubernetesClient client, String jobName) {
         try {
@@ -1448,9 +1448,6 @@ public class DevOpsService {
         };
     }
 
-    /**
-     * ── Layer 4: Diagnose main (kaniko) container failure ──
-     */
     /**
      * ── Layer 4: Diagnose Job/Pod failure (Detailed) ──
      */
@@ -1591,17 +1588,17 @@ public class DevOpsService {
      */
     @Scheduled(fixedRate = 60000)
     public void sweepStalePipelines() {
-        LocalDateTime cutoff = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(30);
+        LocalDateTime cutoff = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusMinutes(90);
         for (Map.Entry<String, PipelineRun> entry : pipelineRuns.entrySet()) {
             PipelineRun run = entry.getValue();
             if (!run.isFinished() && run.getLastActivityTime().isBefore(cutoff)) {
-                run.addLog("[WARN] 流水线超过 30 分钟无活动, 强制终止");
-                run.fail("超时被系统强制终止 (30分钟无活动)");
+                run.addLog("[WARN] 流水线超过 90 分钟无活动, 强制终止");
+                run.fail("超时被系统强制终止 (90分钟无活动)");
                 broadcastStatus(run);
                 broadcastLog(run);
                 completeEmitters(run.getId());
                 // Try to cleanup the K3s Job
-                String jobName = "kaniko-" + run.getId();
+                String jobName = "buildkit-" + run.getId();
                 try (KubernetesClient client = new KubernetesClientBuilder().build()) {
                     cleanupJob(client, jobName);
                 } catch (Exception ignored) {

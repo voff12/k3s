@@ -4,7 +4,7 @@ import java.util.Map;
 
 /**
  * 发布执行触发器抽象：交付中心通过它启动一次真实构建部署并查询进度。
- * 生产实现为 KanikoPipelineTrigger（包装现有 DevOpsService 流水线）；
+ * 生产实现为 BuildKitPipelineTrigger（包装现有 DevOpsService 流水线）；
  * 测试用假实现验证阶段推进。
  */
 public interface PipelineTrigger {

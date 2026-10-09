@@ -331,7 +331,7 @@
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">镜像构建</span>
-                                            <span class="font-mono font-medium text-slate-700">Kaniko</span>
+                                            <span class="font-mono font-medium text-slate-700">BuildKit</span>
                                         </div>
                                         <div class="flex justify-between items-center text-xs">
                                             <span class="text-slate-500">镜像仓库</span>
@@ -707,7 +707,7 @@
                 <div class="flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
                     <span class="material-symbols-outlined text-primary text-lg mt-0.5">info</span>
                     <p class="text-xs text-blue-700 leading-relaxed" id="flowHint">
-                        发布流程: K8s Job 自动编排 → 克隆代码 → 依赖构建 → Kaniko 镜像构建推送 Harbor → kubectl 部署
+                        发布流程: K8s Job 自动编排 → 克隆代码 → 依赖构建 → BuildKit 镜像构建推送 Harbor → kubectl 部署
                         K3s。全程 SSE 实时日志推送。
                     </p>
                 </div>
@@ -758,8 +758,8 @@
             if (hint) {
                 hint.textContent = isPy
                     ? ('发布流程: K8s Job → 克隆代码 → pip 安装(' + document.getElementById('formPythonServer').value
-                        + ')→ Kaniko 镜像构建推送 Harbor → kubectl 部署 K3s。全程 SSE 实时日志。')
-                    : '发布流程: K8s Job → 克隆代码 → 依赖构建 → Kaniko 镜像构建推送 Harbor → kubectl 部署 K3s。全程 SSE 实时日志。';
+                        + ')→ BuildKit 镜像构建推送 Harbor → kubectl 部署 K3s。全程 SSE 实时日志。')
+                    : '发布流程: K8s Job → 克隆代码 → 依赖构建 → BuildKit 镜像构建推送 Harbor → kubectl 部署 K3s。全程 SSE 实时日志。';
             }
         }
 

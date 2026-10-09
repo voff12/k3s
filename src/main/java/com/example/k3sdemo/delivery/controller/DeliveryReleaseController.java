@@ -19,7 +19,7 @@ import java.util.Map;
 
 /**
  * 发布查询与创建（设计 4.3，P2 范围：列表/详情/创建）。
- * 执行：POST /{id}/execute 接现有 Kaniko 流水线（P3 桥接）。
+ * 执行：POST /{id}/execute 接现有 BuildKit 流水线（P3 桥接）。
  */
 @RestController
 @RequestMapping("/api/delivery/releases")
@@ -59,7 +59,7 @@ public class DeliveryReleaseController {
     }
 
     /**
-     * 触发执行：接通现有 Kaniko 流水线，异步推进 6 阶段。
+     * 触发执行：接通现有 BuildKit 流水线，异步推进 6 阶段。
      */
     @PostMapping("/{id}/execute")
     public ApiResponse<Release> execute(@PathVariable Long id) {

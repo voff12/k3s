@@ -106,7 +106,7 @@ public class PipelineRunPersistenceService {
     }
 
     /**
-     * 按 runId 从 DB 查询（供 KanikoPipelineTrigger 跨重启轮询）。
+     * 按 runId 从 DB 查询（供 BuildKitPipelineTrigger 跨重启轮询）。
      */
     @Transactional(readOnly = true)
     public Optional<PipelineRun> load(String runId) {

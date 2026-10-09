@@ -10,7 +10,7 @@ import java.util.UUID;
 
 /**
  * 跟踪单次应用发布执行状态。
- * 两步流程: 构建发布 (Clone + Maven + Kaniko → Harbor) → K3s 部署
+ * 两步流程: 构建发布 (Clone + Maven + BuildKit → Harbor) → K3s 部署
  */
 public class ReleaseRecord {
 

@@ -59,13 +59,13 @@ class PipelineRunPersistenceTest {
         persistenceService.onChanged(run);
 
         run.advanceTo(PipelineRun.Status.BUILDING);
-        run.fail("Kaniko 构建失败");
+        run.fail("BuildKit 构建失败");
         persistenceService.onCompleted(run);
 
         PipelineRunEntity entity = pipelineRunRepository.findByRunId(run.getId()).orElseThrow();
         assertThat(entity.getStatus()).isEqualTo("FAILED");
         assertThat(entity.getCurrentStep()).isEqualTo(5);
-        assertThat(entity.getErrorMessage()).isEqualTo("Kaniko 构建失败");
+        assertThat(entity.getErrorMessage()).isEqualTo("BuildKit 构建失败");
         assertThat(entity.getFinishedAt()).isNotNull();
     }
 
