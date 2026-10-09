@@ -50,7 +50,7 @@ public class DevOpsService {
     @Value("${buildkit.memory-limit:4Gi}")
     private String buildkitMemoryLimit;
 
-    @Value("${git.image:alpine/git:latest}")
+    @Value("${git.image:172.16.223.135:5000/git-alpine:3.19}")
     private String gitImage;
 
     /** buildkitd 状态缓存 PVC：跨 Job 复用基础镜像层，避免每次构建重拉基础镜像。 */
@@ -1400,10 +1400,13 @@ public class DevOpsService {
                 + " --opt filename=" + config.getDockerfilePath()
                 + " --opt build-arg:PIP_INDEX_URL=" + pipIndexUrl
                 + " --import-cache type=registry,ref=" + cacheRef
-                + " --export-cache type=registry,ref=" + cacheRef + ",mode=max"
+                // 多阶段构建保留 mode=max; 缓存导出与镜像输出同用 zstd, 上传提速
+                + " --export-cache type=registry,ref=" + cacheRef + ",mode=max,compression=zstd,compression-level=3,force-compression=true"
                 + " --output type=docker,name=" + fullImage + ",dest=/workspace/image.tar"
                 // 双输出: 同时直推 Harbor, 供非构建节点的 Pod 回源拉取 (多节点分发)
-                + " --output type=image,name=" + fullImage + ",push=true"
+                // zstd: oci-mediatypes 必须显式开(否则 compression 被静默忽略), force-compression 重压缓存 gzip 层
+                + " --output type=image,name=" + fullImage
+                + ",push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true"
                 + " --progress=plain";
         jobBuilder = jobBuilder
                 .addNewInitContainer()

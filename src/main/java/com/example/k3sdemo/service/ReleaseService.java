@@ -59,7 +59,7 @@ public class ReleaseService {
     @Value("${buildkit.memory-limit:4Gi}")
     private String buildkitMemoryLimit;
 
-    @Value("${git.image:alpine:3.19}")
+    @Value("${git.image:172.16.223.135:5000/git-alpine:3.19}")
     private String gitImage;
 
     @Value("${maven.image:maven:3.9-eclipse-temurin-17}")
@@ -614,11 +614,14 @@ public class ReleaseService {
                         + " --local context=/workspace"
                         + " --local dockerfile=/workspace"
                         + " --opt filename=Dockerfile.release"
-                        + " --export-cache type=registry,ref=" + harborHost + "/" + harborProject
-                        + "/buildkit-cache,mode=max"
+                        // 单阶段 runtime-only 镜像: mode=min 只导结果层(max 会把镜像本体再推一遍);
+                        // zstd 与镜像输出同参数, 缓存上传提速
+                        + " --export-cache type=registry,ref=" + harborHost + "/" + harborProject + "/buildkit-cache,mode=min,compression=zstd,compression-level=3,force-compression=true"
                         + " --import-cache type=registry,ref=" + harborHost + "/" + harborProject
                         + "/buildkit-cache"
-                        + " --output type=image,name=" + fullImage + ",push=true")
+                        // zstd: oci-mediatypes 必须显式开(否则 compression 被静默忽略), force-compression 重压缓存 gzip 层
+                        + " --output type=image,name=" + fullImage
+                        + ",push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true")
                 .addNewEnv()
                 .withName("BUILDKITD_FLAGS")
                 .withValue("--oci-worker-no-process-sandbox")
