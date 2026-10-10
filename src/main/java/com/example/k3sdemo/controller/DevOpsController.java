@@ -29,11 +29,21 @@ public class DevOpsController {
     public String index(Model model) {
         try {
             List<PipelineRun> runs = devOpsService.listPipelineRuns();
-            model.addAttribute("pipelineRuns", runs != null ? runs : Collections.emptyList());
+            model.addAttribute("pipelineRuns", firstPageOf(runs));
+            model.addAttribute("pipelineTotal", runs != null ? runs.size() : 0);
         } catch (Exception e) {
             model.addAttribute("pipelineRuns", Collections.emptyList());
+            model.addAttribute("pipelineTotal", 0);
         }
         return "devops";
+    }
+
+    /** 历史首屏只渲染第一页，其余由前端分页接口拉取。 */
+    private List<PipelineRun> firstPageOf(List<PipelineRun> runs) {
+        if (runs == null || runs.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return runs.stream().limit(PAGE_SIZE).collect(Collectors.toList());
     }
 
     /**
@@ -232,28 +242,63 @@ public class DevOpsController {
     @ResponseBody
     public List<Map<String, Object>> listPipelines() {
         return devOpsService.listPipelineRuns().stream()
-                .map(run -> {
-                    Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("id", run.getId());
-                    m.put("status", run.getStatus().name());
-                    m.put("statusLabel", run.getStatus().getLabel());
-                    m.put("currentStep", run.getCurrentStep());
-                    m.put("finished", run.isFinished());
-                    m.put("duration", run.getDuration());
-                    m.put("startTime", run.getStartTimeFormatted());
-                    m.put("imageName", run.getConfig().getImageName());
-                    m.put("gitUrl", run.getConfig().getGitUrl());
-                    m.put("branch", run.getConfig().getBranch());
-                    m.put("mergeDeploy", run.isMergeDeploy());
-                    if (run.isMergeDeploy()) {
-                        m.put("baseBranch", run.getConfig().getEffectiveBaseBranch());
-                        m.put("featureBranches", run.getConfig().getNormalizedFeatureBranches());
-                        m.put("previewNamespace", run.getPreviewNamespace());
-                        m.put("previewNodePortUrl", run.getPreviewNodePortUrl());
-                        m.put("conflictFiles", run.getConflictFiles());
-                    }
-                    return m;
-                })
+                .map(this::toSummaryMap)
                 .collect(Collectors.toList());
     }
+
+    /**
+     * 分页列出流水线历史（按开始时间倒序）。
+     * page 从 1 开始；size 默认 10、上限 50，防止一次拉全量。
+     */
+    @GetMapping("/devops/pipelines/page")
+    @ResponseBody
+    public Map<String, Object> listPipelinesPaged(@RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        int safeSize = Math.min(Math.max(size, 1), 50);
+        List<PipelineRun> all = devOpsService.listPipelineRuns();
+        int total = all.size();
+        int totalPages = (total + safeSize - 1) / safeSize;
+        int safePage = Math.min(Math.max(page, 1), Math.max(totalPages, 1));
+
+        List<Map<String, Object>> items = all.stream()
+                .skip((long) (safePage - 1) * safeSize)
+                .limit(safeSize)
+                .map(this::toSummaryMap)
+                .collect(Collectors.toList());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("items", items);
+        result.put("page", safePage);
+        result.put("size", safeSize);
+        result.put("total", total);
+        result.put("totalPages", totalPages);
+        return result;
+    }
+
+    /** 单条流水线历史的摘要字段（列表/分页共用）。 */
+    private Map<String, Object> toSummaryMap(PipelineRun run) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", run.getId());
+        m.put("status", run.getStatus().name());
+        m.put("statusLabel", run.getStatus().getLabel());
+        m.put("currentStep", run.getCurrentStep());
+        m.put("finished", run.isFinished());
+        m.put("duration", run.getDuration());
+        m.put("startTime", run.getStartTimeFormatted());
+        m.put("imageName", run.getConfig().getImageName());
+        m.put("gitUrl", run.getConfig().getGitUrl());
+        m.put("branch", run.getConfig().getBranch());
+        m.put("mergeDeploy", run.isMergeDeploy());
+        if (run.isMergeDeploy()) {
+            m.put("baseBranch", run.getConfig().getEffectiveBaseBranch());
+            m.put("featureBranches", run.getConfig().getNormalizedFeatureBranches());
+            m.put("previewNamespace", run.getPreviewNamespace());
+            m.put("previewNodePortUrl", run.getPreviewNodePortUrl());
+            m.put("conflictFiles", run.getConflictFiles());
+        }
+        return m;
+    }
+
+    /** 流水线历史每页条数（首屏渲染与分页接口默认值保持一致）。 */
+    private static final int PAGE_SIZE = 10;
 }

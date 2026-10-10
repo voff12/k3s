@@ -522,12 +522,18 @@
                                 </div>
                             </div>
                         </div>
+                        <div id="historyPagination"
+                            class="px-6 py-3 border-t border-slate-100 flex items-center justify-between hidden">
+                            <span class="text-xs text-slate-400" id="historyPageInfo"></span>
+                            <div class="flex items-center gap-1" id="historyPageButtons"></div>
+                        </div>
                     </div>
-
                 </div>
+
             </div>
-        </main>
-    </div>
+        </div>
+    </main>
+</div>
 
     <!-- New Pipeline Modal -->
     <div id="pipelineModal" class="fixed inset-0 z-50 hidden">
@@ -1305,22 +1311,25 @@
             }
         }
 
-        // ========== Refresh History ==========
+        // ========== Refresh History (paged) ==========
+        let historyPage = 1;
+
         async function refreshPipelines() {
             try {
-                const resp = await fetch('/devops/pipelines');
+                const resp = await fetch('/devops/pipelines/page?page=' + historyPage);
                 const data = await resp.json();
+                historyPage = data.page || historyPage;
 
                 const container = document.getElementById('pipelineHistory');
 
-                if (data.length === 0) {
+                if (!data.items || data.items.length === 0) {
                     container.innerHTML = `
                         <div class="p-12 text-center">
                             <span class="material-symbols-outlined text-5xl text-slate-300 mb-3">rocket_launch</span>
                             <p class="text-slate-400 text-sm">暂无流水线记录</p>
                         </div>`;
                 } else {
-                    container.innerHTML = data.map(run => `
+                    container.innerHTML = data.items.map(run => `
                         <div class="px-6 py-4 border-b border-slate-50 hover:bg-slate-50/50 transition-colors cursor-pointer flex items-center justify-between"
                              onclick="viewPipeline('${run.id}')">
                             <div class="flex items-center gap-4">
@@ -1349,10 +1358,45 @@
                     `).join('');
                 }
 
-                document.getElementById('historyCount').textContent = data.length + ' 条记录';
+                document.getElementById('historyCount').textContent = data.total + ' 条记录';
+                renderPagination(data.page, data.totalPages);
             } catch (e) {
                 console.error('Failed to refresh:', e);
             }
+        }
+
+        function renderPagination(page, totalPages) {
+            const bar = document.getElementById('historyPagination');
+            const buttons = document.getElementById('historyPageButtons');
+            if (totalPages <= 1) {
+                bar.classList.add('hidden');
+                return;
+            }
+            bar.classList.remove('hidden');
+            document.getElementById('historyPageInfo').textContent =
+                '第 ' + page + ' / ' + totalPages + ' 页';
+
+            const items = [];
+            items.push(pageBtn(page - 1, 'chevron_left', page > 1, '上一页'));
+            for (let p = 1; p <= totalPages; p++) {
+                items.push(pageBtn(p, String(p), p !== page, '', p === page));
+            }
+            items.push(pageBtn(page + 1, 'chevron_right', page < totalPages, '下一页'));
+            buttons.innerHTML = items.join('');
+        }
+
+        function pageBtn(targetPage, label, enabled, title, active) {
+            const base = 'px-2 py-1 rounded text-xs font-semibold transition-colors ';
+            const state = active ? 'bg-primary text-white'
+                : enabled ? 'text-slate-600 hover:bg-slate-100 cursor-pointer'
+                    : 'text-slate-300 cursor-not-allowed';
+            const click = enabled && !active ? ` onclick="goToPage(${targetPage})"` : '';
+            return `<button title="${title || ''}" class="${base}${state}"${click}>${label}</button>`;
+        }
+
+        function goToPage(p) {
+            historyPage = p;
+            refreshPipelines();
         }
 
         // ========== Close Active Panel ==========
@@ -1372,6 +1416,7 @@
         }, 1000);
 
         // ========== 初始化 ==========
+        refreshPipelines();
         refreshPreviews();
     </script>
 </body>
