@@ -19,6 +19,15 @@ public class GitCommitService {
     private String globalGitlabToken;
 
     /**
+     * 按仓库平台选择 Basic Auth 用户名：
+     * GitHub PAT 约定用户名固定为 "x-access-token"（密码位放 token）；
+     * GitLab 约定为 "oauth2"。从 repoUrl 推断，避免应用侧再配一个字段。
+     */
+    public static String authUsernameFor(String repoUrl) {
+        return (repoUrl != null && repoUrl.contains("github.com")) ? "x-access-token" : "oauth2";
+    }
+
+    /**
      * 查指定分支的最新提交（分支头 SHA + 提交标题）。
      *
      * @param repoUrl 仓库地址 (https://...)
@@ -44,7 +53,7 @@ public class GitCommitService {
         try {
             var cmd = Git.lsRemoteRepository().setRemote(repoUrl).setHeads(true).setTags(false);
             if (token != null && !token.isBlank()) {
-                cmd.setCredentialsProvider(new UsernamePasswordCredentialsProvider("oauth2", token));
+                cmd.setCredentialsProvider(new UsernamePasswordCredentialsProvider(authUsernameFor(repoUrl), token));
             }
             for (var ref : cmd.call()) {
                 if (("refs/heads/" + branch).equals(ref.getName())) {
@@ -67,7 +76,7 @@ public class GitCommitService {
             var cmd = Git.cloneRepository().setURI(repoUrl).setDirectory(tmp.toFile())
                     .setDepth(1).setNoTags();
             if (token != null && !token.isBlank()) {
-                cmd.setCredentialsProvider(new UsernamePasswordCredentialsProvider("oauth2", token));
+                cmd.setCredentialsProvider(new UsernamePasswordCredentialsProvider(authUsernameFor(repoUrl), token));
             }
             try (Git git = cmd.call()) {
                 var commit = git.getRepository().parseCommit(

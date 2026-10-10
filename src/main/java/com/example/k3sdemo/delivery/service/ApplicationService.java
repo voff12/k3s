@@ -1,6 +1,7 @@
 package com.example.k3sdemo.delivery.service;
 
 import com.example.k3sdemo.delivery.dto.CreateApplicationRequest;
+import com.example.k3sdemo.delivery.dto.UpdateApplicationRequest;
 import com.example.k3sdemo.delivery.entity.AppEnvironment;
 import com.example.k3sdemo.delivery.entity.Application;
 import com.example.k3sdemo.delivery.entity.PolicyTemplate;
@@ -89,6 +90,32 @@ public class ApplicationService {
         Application app = get(id);
         app.setStatus("DISABLED");
         return applicationRepository.save(app);
+    }
+
+    /**
+     * 部分更新应用的可变字段（编辑入口用）。仅仓库连接相关：repoUrl / gitToken / repoProvider / defaultBranch。
+     * gitToken 语义：null（字段未传）= 保持不变；空串 = 清除；非空 = 替换。
+     * name/code/环境/策略不在编辑范围，避免影响已建发布与环境的关联。
+     */
+    @Transactional
+    public Application update(Long id, UpdateApplicationRequest req) {
+        Application app = get(id);
+        if (req.getRepoUrl() != null && !req.getRepoUrl().isBlank()) {
+            app.setRepoUrl(req.getRepoUrl().trim());
+        }
+        if (req.getGitToken() != null) {
+            app.setGitToken(req.getGitToken().isBlank() ? null : req.getGitToken().trim());
+        }
+        if (req.getRepoProvider() != null && !req.getRepoProvider().isBlank()) {
+            app.setRepoProvider(normalizeProvider(req.getRepoProvider()));
+        }
+        if (req.getDefaultBranch() != null && !req.getDefaultBranch().isBlank()) {
+            app.setDefaultBranch(req.getDefaultBranch().trim());
+        }
+        Application saved = applicationRepository.save(app);
+        activityLog.log(saved.getId(), null, "USER", req.getOperatorName(), "APP_UPDATED",
+                "更新应用 " + saved.getName() + " 的仓库连接配置", null);
+        return saved;
     }
 
     private void validate(CreateApplicationRequest req) {

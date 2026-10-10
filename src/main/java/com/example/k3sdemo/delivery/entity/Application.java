@@ -36,7 +36,8 @@ public class Application {
     @Column(name = "repo_url", nullable = false, length = 512)
     private String repoUrl;
 
-    /** 私有仓库访问 token（各应用自配）；查询接口不回显明文 */
+    /** 私有仓库访问 token（各应用自配）；WRITE_ONLY：可写入更新，序列化不回显明文 */
+    @com.fasterxml.jackson.annotation.JsonProperty(access = com.fasterxml.jackson.annotation.JsonProperty.Access.WRITE_ONLY)
     @Column(name = "git_token", length = 256)
     private String gitToken;
 

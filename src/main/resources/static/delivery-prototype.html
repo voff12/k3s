@@ -79,6 +79,18 @@
         <div class="page-head"><div><div class="eyebrow">APPLICATION CATALOG</div><h1 class="page-title">应用</h1><div class="page-subtitle">以服务为中心查看版本、运行状态和待处理事项。</div></div><div class="head-tools"><button class="btn btn-primary" onclick="startWizard('app-create')">＋ 接入应用</button></div></div>
         <div class="card"><div class="panel-head"><div><div class="panel-title">应用目录 <span class="pill gray" style="margin-left:5px" id="appsCount">0</span></div><div class="panel-sub">按最近更新排序</div></div><div class="table-tools"><input class="search" placeholder="搜索应用或仓库" data-filter="appsTable"/></div></div><div class="table-wrap"><table class="data-table" id="appsTable"><thead><tr><th>应用</th><th>运行时</th><th>环境</th><th>生产发布</th><th>最近更新</th><th>操作</th></tr></thead><tbody id="appsTbody"></tbody></table></div></div>
       </section>
+
+      <section class="view" id="view-app-edit">
+        <div class="page-head"><div><div class="eyebrow">APPLICATION SETTINGS</div><h1 class="page-title">编辑应用</h1><div class="page-subtitle">仓库连接配置。Git Token 不回显，留空表示保持不变。</div></div></div>
+        <div class="card" style="max-width:640px">
+          <div class="field"><label>应用</label><div id="editAppLabel" class="field-help" style="font-size:14px;color:var(--ink)"></div></div>
+          <div class="field"><label for="editRepoUrl">仓库地址</label><input class="input" id="editRepoUrl"/></div>
+          <div class="field-row"><div class="field"><label for="editProvider">仓库平台</label><select class="input" id="editProvider"><option value="gitlab">GitLab</option><option value="github">GitHub</option><option value="other">其他</option></select></div><div class="field"><label for="editBranch">默认分支</label><input class="input" id="editBranch"/></div></div>
+          <div class="field"><label for="editGitToken">Git Token（私有仓库）</label><input class="input" type="password" id="editGitToken" placeholder="留空保持不变；GitHub 用 PAT（repo scope）"/><div class="field-help">GitHub 的 PAT 会自动以 x-access-token 用户名鉴权。勾选右侧即清除已存 token。</div><label class="check-row" style="margin-top:6px"><input type="checkbox" id="editClearToken"/><span><b>清除已保存的 Token</b><small>勾选后保存将移除该应用的私有仓库凭据。</small></span></label></div>
+          <div class="wizard-actions"><button class="btn" onclick="showView('apps')">取消</button><div class="wizard-actions-right"><button class="btn btn-primary" id="saveAppEditBtn" onclick="saveAppEdit(this)">保存</button></div></div>
+        </div>
+      </section>
+
       <section class="view" id="view-releases">
         <div class="page-head"><div><div class="eyebrow">DELIVERY HISTORY</div><h1 class="page-title">发布</h1><div class="page-subtitle">统一追踪变更从代码检查到稳定运行的完整旅程。</div></div><div class="head-tools"><button class="btn btn-primary" onclick="startWizard('release-create')">＋ 新建发布</button></div></div>
         <div class="grid stats" id="releaseStats"></div>
@@ -172,8 +184,8 @@
   <div class="toast" id="toast"></div>
 <script>
     // ===== 视图路由 =====
-    const names={overview:'交付总览',apps:'应用',releases:'发布',quality:'运行质量',cluster:'集群运维',settings:'平台设置','app-create':'接入应用','release-create':'新建发布'};
-    function showView(key){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id==='view-'+key));const navKey=key==='app-create'?'apps':key==='release-create'?'releases':key;document.querySelectorAll('.nav-item[data-view]').forEach(x=>x.classList.toggle('active',x.dataset.view===navKey));document.getElementById('crumbName').textContent=names[key]||'交付总览';window.location.hash=key;window.scrollTo({top:0,behavior:'smooth'});onViewEnter(key)}
+    const names={overview:'交付总览',apps:'应用',releases:'发布',quality:'运行质量',cluster:'集群运维',settings:'平台设置','app-create':'接入应用','app-edit':'编辑应用','release-create':'新建发布'};
+    function showView(key){document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id==='view-'+key));const navKey=key==='app-create'||key==='app-edit'?'apps':key==='release-create'?'releases':key;document.querySelectorAll('.nav-item[data-view]').forEach(x=>x.classList.toggle('active',x.dataset.view===navKey));document.getElementById('crumbName').textContent=names[key]||'交付总览';window.location.hash=key;window.scrollTo({top:0,behavior:'smooth'});onViewEnter(key)}
     function onViewEnter(key){
       if(key==='apps')loadApps();
       else if(key==='releases'){loadReleases();loadActivities()}
@@ -283,7 +295,7 @@
       tbody.innerHTML=APPS.map((a,i)=>{
         const envs=(a.environments||[]).join(' · ')||'—';
         const logo=esc((a.code||a.name||'?').substring(0,1));
-        return '<tr onclick="openReleaseByApp('+a.id+')"><td><div class="app-cell"><div class="app-logo'+appLogoClass(i)+'">'+logo+'</div><div><div class="app-title">'+esc(a.name)+'</div><div class="app-caption">'+esc(a.repoUrl||'')+'</div></div></div></td><td>'+esc(a.runtimeType||'自动')+(a.port?' · '+a.port:'')+'</td><td>'+esc(envs)+'</td><td>'+(a.prodEnabled?pill('green','已启用'):pill('gray','未启用'))+'</td><td>'+esc(fmtDate(a.updatedAt))+'</td><td><button class="btn" onclick="event.stopPropagation();disableApp('+a.id+',\''+esc(a.name)+'\')">停用</button></td></tr>'
+        return '<tr onclick="openReleaseByApp('+a.id+')"><td><div class="app-cell"><div class="app-logo'+appLogoClass(i)+'">'+logo+'</div><div><div class="app-title">'+esc(a.name)+'</div><div class="app-caption">'+esc(a.repoUrl||'')+'</div></div></div></td><td>'+esc(a.runtimeType||'自动')+(a.port?' · '+a.port:'')+'</td><td>'+esc(envs)+'</td><td>'+(a.prodEnabled?pill('green','已启用'):pill('gray','未启用'))+'</td><td>'+esc(fmtDate(a.updatedAt))+'</td><td><button class="btn" onclick="event.stopPropagation();openAppEdit('+a.id+')">编辑</button> <button class="btn" onclick="event.stopPropagation();disableApp('+a.id+',\''+esc(a.name)+'\')">停用</button></td></tr>'
       }).join('');
     }
 
@@ -462,6 +474,33 @@
     async function disableApp(id,name){
       if(!confirm('确认停用应用「'+name+'」？停用后不再出现在应用目录。'))return;
       try{await apiJson(API.applications+'/'+id,{method:'DELETE'});toast('已停用 '+name);loadApps()}catch(e){toast('停用失败：'+e.message)}
+    }
+    // ===== 编辑应用（仓库连接 / Git Token） =====
+    let EDIT_APP_ID=null;
+    function openAppEdit(id){
+      const a=appById(id);if(!a)return;
+      EDIT_APP_ID=id;
+      document.getElementById('editAppLabel').textContent=a.name+'（'+(a.code||'')+'）';
+      document.getElementById('editRepoUrl').value=a.repoUrl||'';
+      document.getElementById('editProvider').value=a.repoProvider||'gitlab';
+      document.getElementById('editBranch').value=a.defaultBranch||'main';
+      document.getElementById('editGitToken').value='';
+      document.getElementById('editClearToken').checked=false;
+      showView('app-edit');
+    }
+    async function saveAppEdit(btn){
+      if(!EDIT_APP_ID)return;
+      const orig=btn.textContent;btn.disabled=true;btn.textContent='保存中…';
+      const payload={repoUrl:document.getElementById('editRepoUrl').value.trim()||null,repoProvider:document.getElementById('editProvider').value,defaultBranch:document.getElementById('editBranch').value.trim()||null,operatorName:'吴工'};
+      const token=document.getElementById('editGitToken').value.trim();
+      if(document.getElementById('editClearToken').checked)payload.gitToken=''; // 空串=清除（后端置 null）
+      else if(token!=='')payload.gitToken=token; // 不传=保持不变
+      try{
+        const app=await apiJson(API.applications+'/'+EDIT_APP_ID,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+        toast('已保存：'+app.name+'（平台='+app.repoProvider+'）');
+        showView('apps');
+      }catch(e){toast('保存失败：'+e.message)}
+      btn.disabled=false;btn.textContent=orig;
     }
     // ===== 执行发布（触发 BuildKit 流水线，阶段异步推进） =====
     async function executeRelease(id,btn){

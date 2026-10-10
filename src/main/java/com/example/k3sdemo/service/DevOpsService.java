@@ -2066,7 +2066,8 @@ public class DevOpsService {
                     .setTags(false);
             if (effToken != null && !effToken.isEmpty()) {
                 cmd.setCredentialsProvider(
-                        new org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider("oauth2", effToken));
+                        new org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider(
+                                com.example.k3sdemo.delivery.service.GitCommitService.authUsernameFor(gitUrl), effToken));
             }
             var refs = cmd.call();
             for (var ref : refs) {

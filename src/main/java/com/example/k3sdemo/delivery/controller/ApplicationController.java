@@ -2,12 +2,14 @@ package com.example.k3sdemo.delivery.controller;
 
 import com.example.k3sdemo.delivery.dto.ApiResponse;
 import com.example.k3sdemo.delivery.dto.CreateApplicationRequest;
+import com.example.k3sdemo.delivery.dto.UpdateApplicationRequest;
 import com.example.k3sdemo.delivery.entity.Application;
 import com.example.k3sdemo.delivery.service.ApplicationService;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -42,6 +44,12 @@ public class ApplicationController {
     @PostMapping
     public ApiResponse<Application> create(@RequestBody CreateApplicationRequest req) {
         return ApiResponse.ok(applicationService.create(req));
+    }
+
+    /** 编辑应用（仓库连接配置：repoUrl / gitToken / repoProvider / defaultBranch），部分更新。 */
+    @PutMapping("/{id}")
+    public ApiResponse<Application> update(@PathVariable Long id, @RequestBody UpdateApplicationRequest req) {
+        return ApiResponse.ok(applicationService.update(id, req));
     }
 
     @DeleteMapping("/{id}")

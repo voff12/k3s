@@ -92,6 +92,8 @@ public class DeliveryQueryController {
             m.put("code", app.getCode());
             m.put("team", app.getTeam());
             m.put("repoUrl", app.getRepoUrl());
+            m.put("repoProvider", app.getRepoProvider());
+            m.put("defaultBranch", app.getDefaultBranch());
             m.put("runtimeType", app.getRuntimeType());
             m.put("port", app.getPort());
             m.put("prodEnabled", app.getProdEnabled());
