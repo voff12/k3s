@@ -614,9 +614,8 @@ public class ReleaseService {
                         + " --local context=/workspace"
                         + " --local dockerfile=/workspace"
                         + " --opt filename=Dockerfile.release"
-                        // 单阶段 runtime-only 镜像: mode=min 只导结果层(max 会把镜像本体再推一遍);
-                        // zstd 与镜像输出同参数, 缓存上传提速
-                        + " --export-cache type=registry,ref=" + harborHost + "/" + harborProject + "/buildkit-cache,mode=min,compression=zstd,compression-level=3,force-compression=true"
+                        // 缓存不再导出到 Harbor: 构建机 buildkit-cache-pvc 已持久化 BuildKit 状态,
+                        // 远程导出耗时占构建总耗时 ~97%; 保留 import-cache 以便 PVC 重建后从 Harbor 恢复
                         + " --import-cache type=registry,ref=" + harborHost + "/" + harborProject
                         + "/buildkit-cache"
                         // zstd: oci-mediatypes 必须显式开(否则 compression 被静默忽略), force-compression 重压缓存 gzip 层

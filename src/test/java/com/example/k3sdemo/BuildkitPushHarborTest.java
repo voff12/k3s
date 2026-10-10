@@ -46,22 +46,16 @@ class BuildkitPushHarborTest {
     }
 
     @Test
-    void cacheExport_zstdAndReleaseMinMode() throws IOException {
-        // A: 两条流水线的缓存导出都启用 zstd(与镜像输出同参数, 上传提速)
-        String cacheZstd = "compression=zstd,compression-level=3,force-compression=true";
+    void cacheExport_disabledButImportKept() throws IOException {
+        // 远程缓存导出每次耗时 ~17 分钟(占构建总耗时 97%), 而构建机 BuildKit 状态已由
+        // buildkit-cache-pvc 持久化 → 两条流水线都不再导出; import-cache 保留以便 PVC 重建后恢复
         String devops = Files.readString(Path.of("src/main/java/com/example/k3sdemo/service/DevOpsService.java"));
-        int devExport = devops.indexOf("--export-cache type=registry,ref=");
-        assertTrue(devExport > 0, "DevOpsService 必须有 registry 缓存导出");
-        assertTrue(devops.substring(devExport, devops.indexOf("\n", devExport)).contains(cacheZstd),
-                "DevOpsService 缓存导出必须启用 zstd");
+        assertTrue(!devops.contains("--export-cache"), "DevOpsService 不得再导出远程缓存(导出耗时占 97%)");
+        assertTrue(devops.contains("--import-cache type=registry,ref="),
+                "DevOpsService 必须保留 import-cache 以便 PVC 重建后从 Harbor 恢复缓存");
         String release = Files.readString(Path.of("src/main/java/com/example/k3sdemo/service/ReleaseService.java"));
-        int relExport = release.indexOf("--export-cache type=registry,ref=");
-        assertTrue(relExport > 0, "ReleaseService 必须有 registry 缓存导出");
-        assertTrue(release.substring(relExport, release.indexOf("\n", relExport)).contains(cacheZstd),
-                "ReleaseService 缓存导出必须启用 zstd");
-        // B: Release 流水线 Dockerfile 是单阶段 runtime-only, mode=max 会把镜像本体再推一遍 → 降为 min
-        String relExportLine = release.substring(relExport, release.indexOf("\n", relExport) + 1);
-        assertTrue(relExportLine.contains("mode=min"),
-                "ReleaseService 缓存导出应为 mode=min(单阶段镜像, max 等于重复推镜像)");
+        assertTrue(!release.contains("--export-cache"), "ReleaseService 不得再导出远程缓存(导出耗时占 97%)");
+        assertTrue(release.contains("--import-cache type=registry,ref="),
+                "ReleaseService 必须保留 import-cache 以便 PVC 重建后从 Harbor 恢复缓存");
     }
 }

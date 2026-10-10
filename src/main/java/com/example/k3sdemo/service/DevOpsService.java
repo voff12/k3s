@@ -1399,9 +1399,9 @@ public class DevOpsService {
                 + " --local dockerfile=/workspace"
                 + " --opt filename=" + config.getDockerfilePath()
                 + " --opt build-arg:PIP_INDEX_URL=" + pipIndexUrl
+                // 缓存不再导出到 Harbor: 构建机 buildkit-cache-pvc 已持久化 BuildKit 状态,
+                // 远程导出每次耗时 ~17 分钟(占构建总耗时 97%); 保留 import-cache 以便 PVC 重建后从 Harbor 恢复
                 + " --import-cache type=registry,ref=" + cacheRef
-                // 多阶段构建保留 mode=max; 缓存导出与镜像输出同用 zstd, 上传提速
-                + " --export-cache type=registry,ref=" + cacheRef + ",mode=max,compression=zstd,compression-level=3,force-compression=true"
                 + " --output type=docker,name=" + fullImage + ",dest=/workspace/image.tar"
                 // 双输出: 同时直推 Harbor, 供非构建节点的 Pod 回源拉取 (多节点分发)
                 // zstd: oci-mediatypes 必须显式开(否则 compression 被静默忽略), force-compression 重压缓存 gzip 层
