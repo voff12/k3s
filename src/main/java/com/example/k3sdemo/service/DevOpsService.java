@@ -1402,11 +1402,10 @@ public class DevOpsService {
                 // 缓存不再导出到 Harbor: 构建机 buildkit-cache-pvc 已持久化 BuildKit 状态,
                 // 远程导出每次耗时 ~17 分钟(占构建总耗时 97%); 保留 import-cache 以便 PVC 重建后从 Harbor 恢复
                 + " --import-cache type=registry,ref=" + cacheRef
+                // 仅 tar 输出: 原直推 Harbor 的 type=image 推送段已移除——
+                // 节点 /etc/hosts 变更后 harbor.local 落到 443 被 Traefik 默认证书拦截(x509),
+                // 改走 tarball + ctr import 路径彻底绕开 Harbor 的 HTTPS 推送通道
                 + " --output type=docker,name=" + fullImage + ",dest=/workspace/image.tar"
-                // 双输出: 同时直推 Harbor, 供非构建节点的 Pod 回源拉取 (多节点分发)
-                // zstd: oci-mediatypes 必须显式开(否则 compression 被静默忽略), force-compression 重压缓存 gzip 层
-                + " --output type=image,name=" + fullImage
-                + ",push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true"
                 + " --progress=plain";
         jobBuilder = jobBuilder
                 .addNewInitContainer()

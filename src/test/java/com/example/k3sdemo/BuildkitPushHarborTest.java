@@ -9,40 +9,44 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 镜像分发（方案 A）：buildkit 容器在产出 docker tar 供节点导入之外，
- * 必须同时以 type=image push=true 把镜像推到 Harbor——修复"新 Pod 调度到
- * 别的节点本地无镜像、回源 Harbor 又没有"导致的 ImagePullBackOff。
+ * 镜像产出路径守卫：
+ * - DevOps 流水线：仅产出 docker tar 供 loader ctr import 到节点 containerd，
+ *   不再直推 Harbor——节点 /etc/hosts 变更后 harbor.local 落到 443 被 Traefik
+ *   默认证书拦截(x509)，直推段已移除以彻底绕开 Harbor 的 HTTPS 推送通道。
+ * - Release 流水线：无 loader/tar 路径，仍依赖 type=image push=true 直推 Harbor，
+ *   应用 Pod 用 harbor-registry-secret 回源拉取。
  */
 class BuildkitPushHarborTest {
 
     private static final String SRC = "src/main/java/com/example/k3sdemo/service/DevOpsService.java";
 
     @Test
-    void buildkitCmd_hasDualOutput_tarImportAndHarborPush() throws IOException {
+    void devopsBuildkitCmd_tarOnlyNoHarborPush() throws IOException {
         String src = Files.readString(Path.of(SRC));
         int start = src.indexOf("String buildkitCmd = ");
-        int end = src.indexOf("\" --progress=plain\"", start);
+        int end = src.indexOf("--progress=plain", start);
         assertTrue(start > 0 && end > start, "必须能定位 buildkitCmd 构造段");
         String cmd = src.substring(start, end);
         // 离线导入路径保留
         assertTrue(cmd.contains("--output type=docker,name=\" + fullImage + \",dest=/workspace/image.tar"),
                 "必须保留 docker tar 输出供 loader 导入节点 containerd");
-        // 同时直推 Harbor (push 参数与压缩参数在同一字符串, 详见 zstd 测试)
-        assertTrue(cmd.contains("--output type=image,name=\" + fullImage"),
-                "必须同时以 type=image 推送 Harbor");
-        assertTrue(cmd.contains("push=true"),
-                "推送 Harbor 必须带 push=true");
+        // 直推 Harbor 段已移除: x509 修复后改走 tarball + ctr import, 绕开 Harbor HTTPS 推送通道
+        assertTrue(!cmd.contains("\" --output type=image"),
+                "DevOps 流水线不得再直推 Harbor(harbor.local 落 443 被 Traefik 拦截致 x509)");
+        assertTrue(!cmd.contains(",push=true"),
+                "DevOps 流水线不得再带 push=true 推送标志");
     }
 
     @Test
-    void buildkitPush_usesZstdCompression_bothPipelines() throws IOException {
-        // zstd 三件套缺一不可: oci-mediatypes=true 才支持 zstd(type=image 默认 docker schema2 会忽略
-        // compression 参数, moby/buildkit#5458); force-compression=true 强制重压缓存里的 gzip 层
+    void devopsPushRemoved_releasePushKeepsZstd() throws IOException {
+        // DevOps: 直推已删, 不得再出现 zstd 推送三件套
         String zstdParams = ",push=true,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true";
         String devops = Files.readString(Path.of("src/main/java/com/example/k3sdemo/service/DevOpsService.java"));
-        assertTrue(devops.contains(zstdParams), "DevOpsService 推 Harbor 必须启用 zstd 压缩");
+        assertTrue(!devops.contains(zstdParams), "DevOpsService 直推段已移除, 不应再含 zstd 推送参数");
+        // Release: 无 loader/tar 路径, 仍靠直推 Harbor; zstd 三件套缺一不可
+        // (oci-mediatypes=true 才支持 zstd, force-compression=true 强制重压缓存里的 gzip 层)
         String release = Files.readString(Path.of("src/main/java/com/example/k3sdemo/service/ReleaseService.java"));
-        assertTrue(release.contains(zstdParams), "ReleaseService 推 Harbor 必须启用 zstd 压缩");
+        assertTrue(release.contains(zstdParams), "ReleaseService 推 Harbor 必须保留 zstd 压缩");
     }
 
     @Test
