@@ -25,6 +25,10 @@ public class CreateApplicationRequest {
     private String operatorName;
     /** 启用的环境：PREVIEW / BETA / PROD */
     private List<String> environments;
+    private DeploymentTemplate deploymentTemplate;
+
+    public DeploymentTemplate getDeploymentTemplate() { return deploymentTemplate; }
+    public void setDeploymentTemplate(DeploymentTemplate deploymentTemplate) { this.deploymentTemplate = deploymentTemplate; }
 
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }

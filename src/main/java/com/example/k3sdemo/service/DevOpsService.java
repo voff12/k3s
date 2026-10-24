@@ -809,8 +809,8 @@ public class DevOpsService {
             container.setImage(fullImage);
             container.setImagePullPolicy("IfNotPresent"); // Force local image usage
             if (config.isDeliveryManaged()) {
-                ensureDeliveryEnvironment(container);
-                run.addLog("[INFO] 已补齐交付应用 Nacos 连接配置（已有环境变量不覆盖）");
+                ensureDeliveryEnvironment(container, config.getDeploymentTemplate());
+                run.addLog("[INFO] 已应用部署模板（已有环境变量不覆盖）");
             }
 
             client.apps().deployments().inNamespace(ns).resource(deployment).update();
@@ -846,9 +846,60 @@ public class DevOpsService {
         container.setEnv(env);
     }
 
-    private void ensureDeliveryEnvironment(Container container) {
-        ensureDeliveryEnvironment(container, deliveryNacosServerAddr,
-                deliveryNacosNamespace, deliveryNacosGroup);
+    private void ensureDeliveryEnvironment(Container container,
+            com.example.k3sdemo.delivery.dto.DeploymentTemplate template) {
+        if (template != null) {
+            applyDeploymentTemplate(container, template);
+        } else {
+            // 兼容未配置模板的历史应用。
+            ensureDeliveryEnvironment(container, deliveryNacosServerAddr,
+                    deliveryNacosNamespace, deliveryNacosGroup);
+        }
+    }
+
+    static void applyDeploymentTemplate(Container container,
+            com.example.k3sdemo.delivery.dto.DeploymentTemplate template) {
+        List<EnvVar> env = container.getEnv() == null ? new ArrayList<>() : container.getEnv();
+        if (template.getEnv() != null) {
+            template.getEnv().forEach((name, value) -> addEnvIfAbsent(env, name, value));
+        }
+        if (template.getSecretEnv() != null) {
+            template.getSecretEnv().forEach((name, ref) -> addSecretEnvIfAbsent(env, name, ref.getName(), ref.getKey()));
+        }
+        var nacos = template.getNacos();
+        if (nacos != null && Boolean.TRUE.equals(nacos.getEnabled())) {
+            addEnvIfAbsent(env, "NACOS_ENABLED", "true");
+            addEnvIfAbsent(env, "NACOS_SERVER_ADDR", nacos.getServerAddr());
+            addEnvIfAbsent(env, "NACOS_NAMESPACE", nacos.getNamespace());
+            addEnvIfAbsent(env, "NACOS_GROUP", nacos.getGroup());
+            addEnvIfAbsent(env, "NACOS_DATA_ID", nacos.getDataId());
+            addSecretEnvIfAbsent(env, "NACOS_USERNAME", nacos.getAuthSecretRef(), "username");
+            addSecretEnvIfAbsent(env, "NACOS_PASSWORD", nacos.getAuthSecretRef(), "password");
+        }
+        container.setEnv(env);
+        if (template.getEnvFrom() != null) {
+            List<EnvFromSource> sources = container.getEnvFrom() == null ? new ArrayList<>() : container.getEnvFrom();
+            template.getEnvFrom().forEach(reference -> addEnvFromIfAbsent(sources, reference));
+            container.setEnvFrom(sources);
+        }
+    }
+
+    static void addEnvFromIfAbsent(List<EnvFromSource> sources, String reference) {
+        String[] parts = reference.split(":", 2);
+        if (sources.stream().anyMatch(source -> reference.equals(envFromKey(source)))) return;
+        EnvFromSource source = new EnvFromSource();
+        if ("secret".equals(parts[0])) {
+            source.setSecretRef(new SecretEnvSource(parts[1], null));
+        } else {
+            source.setConfigMapRef(new ConfigMapEnvSource(parts[1], null));
+        }
+        sources.add(source);
+    }
+
+    private static String envFromKey(EnvFromSource source) {
+        if (source.getSecretRef() != null) return "secret:" + source.getSecretRef().getName();
+        if (source.getConfigMapRef() != null) return "configMap:" + source.getConfigMapRef().getName();
+        return "";
     }
 
     static void addEnvIfAbsent(List<EnvVar> env, String name, String value) {
@@ -858,11 +909,15 @@ public class DevOpsService {
     }
 
     static void addSecretEnvIfAbsent(List<EnvVar> env, String name, String key) {
+        addSecretEnvIfAbsent(env, name, "nacos-auth", key);
+    }
+
+    static void addSecretEnvIfAbsent(List<EnvVar> env, String name, String secretName, String key) {
         if (env.stream().noneMatch(item -> name.equals(item.getName()))) {
             env.add(new EnvVarBuilder()
                     .withName(name)
                     .withNewValueFrom()
-                    .withNewSecretKeyRef(key, "nacos-auth", false)
+                    .withNewSecretKeyRef(key, secretName, false)
                     .endValueFrom()
                     .build());
         }

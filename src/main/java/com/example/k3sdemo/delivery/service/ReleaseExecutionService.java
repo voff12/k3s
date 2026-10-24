@@ -40,6 +40,7 @@ public class ReleaseExecutionService {
     private final ArtifactRepository artifactRepository;
     private final PipelineTrigger pipelineTrigger;
     private final ActivityLogService activityLog;
+    private final DeploymentTemplateService deploymentTemplateService;
     private final ExecutorService pollExecutor = Executors.newFixedThreadPool(2);
 
     /** releaseId → pipelineId，供页面关联流水线日志 */
@@ -50,13 +51,15 @@ public class ReleaseExecutionService {
                                    ApplicationRepository applicationRepository,
                                    ArtifactRepository artifactRepository,
                                    PipelineTrigger pipelineTrigger,
-                                   ActivityLogService activityLog) {
+                                   ActivityLogService activityLog,
+                                   DeploymentTemplateService deploymentTemplateService) {
         this.releaseRepository = releaseRepository;
         this.persistenceService = persistenceService;
         this.applicationRepository = applicationRepository;
         this.artifactRepository = artifactRepository;
         this.pipelineTrigger = pipelineTrigger;
         this.activityLog = activityLog;
+        this.deploymentTemplateService = deploymentTemplateService;
     }
 
     /** 触发执行：校验状态并启动流水线，立即返回。 */
@@ -79,11 +82,14 @@ public class ReleaseExecutionService {
         String imageName = artifact.getImageRepo();
         String deployment = "app-" + release.getAppId();
         String namespace = "default";
+        com.example.k3sdemo.delivery.dto.DeploymentTemplate template = applicationRepository.findById(release.getAppId())
+                .map(app -> deploymentTemplateService.resolve(app, release.getEnv()))
+                .orElseGet(com.example.k3sdemo.delivery.dto.DeploymentTemplate::new);
 
         String pipelineId;
         try {
             pipelineId = pipelineTrigger.trigger(gitUrlFor(release),
-                    branchFor(artifact), imageName, deployment, namespace);
+                    branchFor(artifact), imageName, deployment, namespace, template);
         } catch (PipelineTrigger.TriggerException e) {
             activityLog.log(release.getAppId(), releaseId, "SYSTEM", null,
                     "EXECUTE_FAILED", "触发流水线失败: " + e.getMessage(), release.getEnv());

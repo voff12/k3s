@@ -28,15 +28,18 @@ public class ApplicationService {
     private final AppEnvironmentRepository appEnvironmentRepository;
     private final PolicyTemplateRepository policyTemplateRepository;
     private final ActivityLogService activityLog;
+    private final DeploymentTemplateService deploymentTemplateService;
 
     public ApplicationService(ApplicationRepository applicationRepository,
                               AppEnvironmentRepository appEnvironmentRepository,
                               PolicyTemplateRepository policyTemplateRepository,
-                              ActivityLogService activityLog) {
+                              ActivityLogService activityLog,
+                              DeploymentTemplateService deploymentTemplateService) {
         this.applicationRepository = applicationRepository;
         this.appEnvironmentRepository = appEnvironmentRepository;
         this.policyTemplateRepository = policyTemplateRepository;
         this.activityLog = activityLog;
+        this.deploymentTemplateService = deploymentTemplateService;
     }
 
     public List<Application> list(String team) {
@@ -77,6 +80,7 @@ public class ApplicationService {
         app.setHealthPath(req.getHealthPath());
         app.setPolicyTemplateId(resolvePolicyTemplateId(req.getPolicyTemplateCode()));
         app.setProdEnabled(environments.contains("PROD"));
+        app.setDeploymentTemplateJson(deploymentTemplateService.serialize(req.getDeploymentTemplate()));
         Application saved = applicationRepository.save(app);
 
         saveEnvironments(saved, environments);
@@ -112,10 +116,26 @@ public class ApplicationService {
         if (req.getDefaultBranch() != null && !req.getDefaultBranch().isBlank()) {
             app.setDefaultBranch(req.getDefaultBranch().trim());
         }
+        if (req.getDeploymentTemplate() != null) {
+            app.setDeploymentTemplateJson(deploymentTemplateService.serialize(req.getDeploymentTemplate()));
+        }
         Application saved = applicationRepository.save(app);
         activityLog.log(saved.getId(), null, "USER", req.getOperatorName(), "APP_UPDATED",
                 "更新应用 " + saved.getName() + " 的仓库连接配置", null);
         return saved;
+    }
+
+    public com.example.k3sdemo.delivery.dto.DeploymentTemplate deploymentTemplate(Long id) {
+        return deploymentTemplateService.readTemplate(get(id).getDeploymentTemplateJson());
+    }
+
+    @Transactional
+    public AppEnvironment saveEnvironmentTemplate(Long id, com.example.k3sdemo.delivery.dto.ApplicationEnvironmentRequest req) {
+        get(id);
+        if (req.getEnv() == null || !List.of("PREVIEW", "BETA", "PROD").contains(req.getEnv())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "未知环境: " + req.getEnv());
+        }
+        return deploymentTemplateService.saveOverride(id, req.getEnv(), req.getDeploymentOverride());
     }
 
     private void validate(CreateApplicationRequest req) {

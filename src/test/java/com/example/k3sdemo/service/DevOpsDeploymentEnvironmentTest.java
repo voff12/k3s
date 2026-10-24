@@ -56,6 +56,41 @@ class DevOpsDeploymentEnvironmentTest {
     }
 
     @Test
+    void templateRendersNacosAndSecretsWithoutOverridingExistingValues() {
+        var template = new com.example.k3sdemo.delivery.dto.DeploymentTemplate();
+        var nacos = template.getNacos();
+        nacos.setEnabled(true);
+        nacos.setServerAddr("nacos.default.svc.cluster.local:8848");
+        nacos.setNamespace("");
+        nacos.setGroup("DEFAULT_GROUP");
+        nacos.setDataId("order-service.yaml");
+        nacos.setAuthSecretRef("nacos-auth");
+        template.getEnv().put("SPRING_PROFILES_ACTIVE", "prod");
+        var ref = new com.example.k3sdemo.delivery.dto.DeploymentTemplate.SecretRef();
+        ref.setName("order-db");
+        ref.setKey("password");
+        template.getSecretEnv().put("DB_PASSWORD", ref);
+        template.getEnvFrom().add("configMap:order-settings");
+        var container = new io.fabric8.kubernetes.api.model.Container();
+        container.setEnv(new ArrayList<>(List.of(new EnvVar("SPRING_PROFILES_ACTIVE", "existing", null))));
+
+        DevOpsService.applyDeploymentTemplate(container, template);
+
+        assertThat(container.getEnv()).filteredOn(e -> "SPRING_PROFILES_ACTIVE".equals(e.getName()))
+                .singleElement().extracting(EnvVar::getValue).isEqualTo("existing");
+        assertThat(container.getEnv()).filteredOn(e -> "DB_PASSWORD".equals(e.getName()))
+                .singleElement().satisfies(e -> {
+                    assertThat(e.getValue()).isNull();
+                    assertThat(e.getValueFrom().getSecretKeyRef().getName()).isEqualTo("order-db");
+                    assertThat(e.getValueFrom().getSecretKeyRef().getKey()).isEqualTo("password");
+                });
+        assertThat(container.getEnv()).extracting(EnvVar::getName)
+                .contains("NACOS_ENABLED", "NACOS_SERVER_ADDR", "NACOS_DATA_ID");
+        assertThat(container.getEnvFrom()).singleElement()
+                .extracting(e -> e.getConfigMapRef().getName()).isEqualTo("order-settings");
+    }
+
+    @Test
     void deliveryTriggerMarksDeploymentForRuntimeEnvironmentPatch() {
         var config = new com.example.k3sdemo.model.PipelineConfig();
         config.setDeliveryManaged(true);

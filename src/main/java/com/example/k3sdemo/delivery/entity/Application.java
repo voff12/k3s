@@ -64,6 +64,12 @@ public class Application {
     @Column(name = "policy_template_id")
     private Long policyTemplateId;
 
+    @Column(name = "deployment_template_json", columnDefinition = "json")
+    private String deploymentTemplateJson;
+
+    public String getDeploymentTemplateJson() { return deploymentTemplateJson; }
+    public void setDeploymentTemplateJson(String value) { this.deploymentTemplateJson = value; }
+
     @Column(name = "prod_enabled", nullable = false)
     private Boolean prodEnabled = false;
 

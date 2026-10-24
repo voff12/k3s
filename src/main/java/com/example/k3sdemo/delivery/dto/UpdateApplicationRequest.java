@@ -12,6 +12,10 @@ public class UpdateApplicationRequest {
     private String defaultBranch;
     /** 触发人（无用户体系，暂由前端传入） */
     private String operatorName;
+    private DeploymentTemplate deploymentTemplate;
+
+    public DeploymentTemplate getDeploymentTemplate() { return deploymentTemplate; }
+    public void setDeploymentTemplate(DeploymentTemplate deploymentTemplate) { this.deploymentTemplate = deploymentTemplate; }
 
     public String getRepoUrl() { return repoUrl; }
     public void setRepoUrl(String repoUrl) { this.repoUrl = repoUrl; }

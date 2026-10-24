@@ -24,6 +24,13 @@ public class BuildKitPipelineTrigger implements PipelineTrigger {
     @Override
     public String trigger(String gitUrl, String branch, String imageName,
                           String deployment, String namespace) {
+        return trigger(gitUrl, branch, imageName, deployment, namespace, null);
+    }
+
+    @Override
+    public String trigger(String gitUrl, String branch, String imageName,
+                          String deployment, String namespace,
+                          com.example.k3sdemo.delivery.dto.DeploymentTemplate template) {
         PipelineConfig config = new PipelineConfig();
         config.setGitUrl(gitUrl);
         config.setBranch(branch != null && !branch.isBlank() ? branch : "main");
@@ -31,6 +38,7 @@ public class BuildKitPipelineTrigger implements PipelineTrigger {
         config.setImageTag("rel-" + System.currentTimeMillis());
         config.setDeploymentName(deployment);
         config.setDeliveryManaged(true);
+        config.setDeploymentTemplate(template);
         config.setNamespace(namespace != null && !namespace.isBlank() ? namespace : "default");
         config.setRuntime("auto");
         try {

@@ -60,7 +60,8 @@ public class DeliveryMcpTools {
             @McpToolParam(description = "Git 仓库地址") String repoUrl,
             @McpToolParam(description = "私有仓库访问 token，可选，登记制品时读取最新提交用", required = false) String gitToken,
             @McpToolParam(description = "默认分支，可选，缺省 main", required = false) String defaultBranch,
-            @McpToolParam(description = "运行时类型 java/python/docker，可选，接入时自动识别", required = false) String runtimeType) {
+            @McpToolParam(description = "运行时类型 java/python/docker，可选，接入时自动识别", required = false) String runtimeType,
+            @McpToolParam(description = "部署模板，可选；只含普通 env、Secret 引用和 Nacos 连接，不含 Secret 明文", required = false) com.example.k3sdemo.delivery.dto.DeploymentTemplate deploymentTemplate) {
         try {
             CreateApplicationRequest req = new CreateApplicationRequest();
             req.setName(name);
@@ -69,6 +70,7 @@ public class DeliveryMcpTools {
             req.setGitToken(gitToken);
             req.setDefaultBranch(defaultBranch);
             req.setRuntimeType(runtimeType);
+            req.setDeploymentTemplate(deploymentTemplate);
             Application app = applicationService.create(req);
             return ok(Map.of("application", appView(app)));
         } catch (Exception e) {
@@ -170,6 +172,9 @@ public class DeliveryMcpTools {
         m.put("repoUrl", a.getRepoUrl());
         m.put("defaultBranch", a.getDefaultBranch());
         m.put("status", a.getStatus());
+        if (a.getDeploymentTemplateJson() != null) {
+            m.put("deploymentTemplate", applicationService.deploymentTemplate(a.getId()));
+        }
         return m;
     }
 

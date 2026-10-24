@@ -54,7 +54,7 @@ class DeliveryMcpToolsTest {
     @Test
     void appCreateAndList() {
         Map<String, Object> created = tools.appCreate("订单服务", "order-service",
-                "https://git.example.com/trade/order-service.git", null, "main", null);
+                "https://git.example.com/trade/order-service.git", null, "main", null, null);
         assertThat(created.get("success")).isEqualTo(true);
         @SuppressWarnings("unchecked")
         Map<String, Object> appView = (Map<String, Object>) created.get("application");

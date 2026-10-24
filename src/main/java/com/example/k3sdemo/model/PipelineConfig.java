@@ -19,6 +19,10 @@ public class PipelineConfig {
     private String deploymentName;
     /** 是否由交付中心管理，决定是否补齐应用运行环境。 */
     private boolean deliveryManaged;
+    private com.example.k3sdemo.delivery.dto.DeploymentTemplate deploymentTemplate;
+
+    public com.example.k3sdemo.delivery.dto.DeploymentTemplate getDeploymentTemplate() { return deploymentTemplate; }
+    public void setDeploymentTemplate(com.example.k3sdemo.delivery.dto.DeploymentTemplate value) { this.deploymentTemplate = value; }
     private String dockerfilePath = "./Dockerfile";
     private String gitToken;
     private String buildCommand = "mvn clean package -DskipTests";

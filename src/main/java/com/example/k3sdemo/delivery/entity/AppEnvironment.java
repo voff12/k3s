@@ -41,6 +41,12 @@ public class AppEnvironment {
     @Column(name = "config_json", columnDefinition = "json")
     private String configJson;
 
+    @Column(name = "deployment_override_json", columnDefinition = "json")
+    private String deploymentOverrideJson;
+
+    public String getDeploymentOverrideJson() { return deploymentOverrideJson; }
+    public void setDeploymentOverrideJson(String value) { this.deploymentOverrideJson = value; }
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

@@ -1,6 +1,7 @@
 package com.example.k3sdemo.delivery.controller;
 
 import com.example.k3sdemo.delivery.dto.ApiResponse;
+import com.example.k3sdemo.delivery.dto.ApplicationEnvironmentRequest;
 import com.example.k3sdemo.delivery.dto.CreateApplicationRequest;
 import com.example.k3sdemo.delivery.dto.UpdateApplicationRequest;
 import com.example.k3sdemo.delivery.entity.Application;
@@ -50,6 +51,19 @@ public class ApplicationController {
     @PutMapping("/{id}")
     public ApiResponse<Application> update(@PathVariable Long id, @RequestBody UpdateApplicationRequest req) {
         return ApiResponse.ok(applicationService.update(id, req));
+    }
+
+    @GetMapping("/{id}/deployment-template")
+    public ApiResponse<com.example.k3sdemo.delivery.dto.DeploymentTemplate> deploymentTemplate(@PathVariable Long id) {
+        return ApiResponse.ok(applicationService.deploymentTemplate(id));
+    }
+
+    @org.springframework.web.bind.annotation.PutMapping("/{id}/environments/{env}/deployment-template")
+    public ApiResponse<com.example.k3sdemo.delivery.entity.AppEnvironment> environmentTemplate(
+            @PathVariable Long id, @PathVariable String env,
+            @RequestBody ApplicationEnvironmentRequest req) {
+        req.setEnv(env);
+        return ApiResponse.ok(applicationService.saveEnvironmentTemplate(id, req));
     }
 
     @DeleteMapping("/{id}")

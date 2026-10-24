@@ -121,6 +121,10 @@
             <div class="wizard-pane" data-wizard="app" data-step="2"><h2>确认构建配置</h2><div class="wizard-intro">运行时信息用于流水线构建，可留空由平台自动识别。</div>
               <div class="field-row"><div class="field"><label for="appRuntime">运行时类型</label><select class="input" id="appRuntime"><option value="">自动识别</option><option value="java">Java</option><option value="python">Python</option><option value="docker">Docker</option></select></div><div class="field"><label for="appPort">应用端口</label><input class="input" type="number" id="appPort" value="8080"/></div></div>
               <div class="field"><label for="healthPath">健康检查路径</label><input class="input" id="healthPath" value="/actuator/health/readiness"/></div>
+              <div class="field-row"><div class="field"><label for="appNacosEnabled">Nacos 配置中心</label><select class="input" id="appNacosEnabled"><option value="false">不使用</option><option value="true">使用</option></select></div><div class="field"><label for="appNacosDataId">配置 Data ID</label><input class="input" id="appNacosDataId" placeholder="order-service.yaml"/></div></div>
+              <div class="field-row"><div class="field"><label for="appNacosAddr">Nacos 地址</label><input class="input" id="appNacosAddr" value="nacos.default.svc.cluster.local:8848"/></div><div class="field"><label for="appNacosNamespace">Nacos namespace</label><input class="input" id="appNacosNamespace" placeholder="留空 = public"/></div></div>
+              <div class="field-row"><div class="field"><label for="appNacosSecret">认证 Secret</label><input class="input" id="appNacosSecret" value="nacos-auth"/></div><div class="field"><label for="appDbSecret">数据库 Secret（name:key）</label><input class="input" id="appDbSecret" placeholder="order-service-db:password"/></div></div>
+              <div class="field"><label for="appExtraEnv">普通环境变量（每行 KEY=VALUE）</label><textarea class="input" id="appExtraEnv" rows="2" placeholder="SPRING_PROFILES_ACTIVE=prod"></textarea></div>
               <div class="wizard-actions"><button class="btn" onclick="setWizardStep('app',1)">← 返回</button><div class="wizard-actions-right"><button class="btn btn-primary" onclick="nextWizard('app',2)">继续配置 →</button></div></div>
             </div>
             <div class="wizard-pane" data-wizard="app" data-step="3"><h2>选择环境与发布策略</h2><div class="wizard-intro">勾选启用的环境；生产环境需在策略确认后开放。</div>
@@ -554,7 +558,24 @@
     async function finishAppWizard(btn){
       const orig=btn.textContent;btn.disabled=true;btn.textContent='提交中…';
       const envs=[...document.querySelectorAll('[data-wizard="app"][data-step="3"] input[type="checkbox"]')].map((b,i)=>b.checked?['PREVIEW','BETA','PROD'][i]:null).filter(Boolean);
-      const payload={name:document.getElementById('appName').value.trim(),repoUrl:document.getElementById('appRepo').value.trim(),repoProvider:(document.querySelector('[data-choice-group="git-provider"].selected')||{dataset:{value:'gitlab'}}).dataset.value,defaultBranch:document.getElementById('appBranch').value.trim()||'main',team:document.getElementById('appTeam').value.trim()||null,namespace:document.getElementById('appNamespace').value.trim()||null,runtimeType:document.getElementById('appRuntime').value||null,port:Number(document.getElementById('appPort').value)||null,healthPath:document.getElementById('healthPath').value||null,environments:envs,operatorName:'吴工'};
+      const nacosEnabled=document.getElementById('appNacosEnabled').value==='true';
+      const nacos={enabled:nacosEnabled};
+      if(nacosEnabled){
+        nacos.serverAddr=document.getElementById('appNacosAddr').value.trim();
+        nacos.namespace=document.getElementById('appNacosNamespace').value.trim();
+        nacos.group='DEFAULT_GROUP';
+        nacos.dataId=document.getElementById('appNacosDataId').value.trim();
+        nacos.authSecretRef=document.getElementById('appNacosSecret').value.trim();
+      }
+      const env={};
+      for(const line of document.getElementById('appExtraEnv').value.split('\n')){
+        const separator=line.indexOf('=');
+        if(separator>0)env[line.slice(0,separator).trim()]=line.slice(separator+1).trim();
+      }
+      const secretEnv={};
+      const dbSecret=document.getElementById('appDbSecret').value.trim();
+      if(dbSecret){const [name,key]=dbSecret.split(':');secretEnv.DB_PASSWORD={name,key}}
+      const payload={name:document.getElementById('appName').value.trim(),repoUrl:document.getElementById('appRepo').value.trim(),repoProvider:(document.querySelector('[data-choice-group="git-provider"].selected')||{dataset:{value:'gitlab'}}).dataset.value,defaultBranch:document.getElementById('appBranch').value.trim()||'main',team:document.getElementById('appTeam').value.trim()||null,namespace:document.getElementById('appNamespace').value.trim()||null,runtimeType:document.getElementById('appRuntime').value||null,port:Number(document.getElementById('appPort').value)||null,healthPath:document.getElementById('healthPath').value||null,environments:envs,deploymentTemplate:{nacos,env,secretEnv},operatorName:'吴工'};
       try{
         const app=await apiJson(API.applications,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
         toast('接入成功：'+app.name+'（code='+app.code+'）');

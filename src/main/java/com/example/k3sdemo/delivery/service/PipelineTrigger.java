@@ -22,6 +22,12 @@ public interface PipelineTrigger {
     String trigger(String gitUrl, String branch, String imageName,
                    String deployment, String namespace);
 
+    default String trigger(String gitUrl, String branch, String imageName,
+                         String deployment, String namespace,
+                         com.example.k3sdemo.delivery.dto.DeploymentTemplate template) {
+        return trigger(gitUrl, branch, imageName, deployment, namespace);
+    }
+
     /**
      * 查询流水线当前状态。
      *
