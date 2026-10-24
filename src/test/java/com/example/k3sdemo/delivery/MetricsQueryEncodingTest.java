@@ -78,6 +78,9 @@ class MetricsQueryEncodingTest {
         ensureServerStarted();
         registry.add("prometheus.url",
                 () -> "http://127.0.0.1:" + server.getAddress().getPort());
+        // 全量测试高负载（多个 Spring 上下文启动的 GC/CPU 竞争）下默认 4s block 超时
+        // 偶发被耗尽导致指标为 null，测试放宽到 15s；生产默认不受影响。
+        registry.add("prometheus.query.timeout", () -> "15s");
     }
 
     @Autowired

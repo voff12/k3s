@@ -20,12 +20,18 @@ public class MetricsQueryService {
     private final WebClient webClient;
     private final String prometheusUrl;
     private final boolean percentilesHistogram;
+    private final Duration queryTimeout;
+    private final Duration rangeQueryTimeout;
 
     public MetricsQueryService(@Value("${prometheus.url:}") String prometheusUrl,
                                @Value("${management.metrics.distribution.percentiles-histogram.http.server.requests:false}")
-                               boolean percentilesHistogram) {
+                               boolean percentilesHistogram,
+                               @Value("${prometheus.query.timeout:4s}") Duration queryTimeout,
+                               @Value("${prometheus.query.range-timeout:6s}") Duration rangeQueryTimeout) {
         this.prometheusUrl = prometheusUrl == null ? "" : prometheusUrl.trim();
         this.percentilesHistogram = percentilesHistogram;
+        this.queryTimeout = queryTimeout;
+        this.rangeQueryTimeout = rangeQueryTimeout;
         this.webClient = WebClient.builder()
                 .baseUrl(this.prometheusUrl.isEmpty() ? "http://prometheus:9090" : this.prometheusUrl)
                 .build();
@@ -141,7 +147,7 @@ public class MetricsQueryService {
                     .uri(prometheusUrl + "/api/v1/query?query=" + encoded)
                     .retrieve()
                     .bodyToMono(Map.class)
-                    .block(Duration.ofSeconds(4));
+                    .block(queryTimeout);
             if (resp == null || !"success".equals(resp.get("status"))) {
                 return null;
             }
@@ -175,7 +181,7 @@ public class MetricsQueryService {
                             + "&start=" + startSec + "&end=" + endSec + "&step=" + stepSec)
                     .retrieve()
                     .bodyToMono(Map.class)
-                    .block(Duration.ofSeconds(6));
+                    .block(rangeQueryTimeout);
             if (resp == null || !"success".equals(resp.get("status"))) {
                 return List.of();
             }
