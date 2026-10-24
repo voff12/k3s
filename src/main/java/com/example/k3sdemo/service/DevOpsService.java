@@ -53,6 +53,15 @@ public class DevOpsService {
     @Value("${git.image:172.16.223.135:5000/git-alpine:3.19}")
     private String gitImage;
 
+    @Value("${delivery.nacos.server-addr:nacos.default.svc.cluster.local:8848}")
+    private String deliveryNacosServerAddr;
+
+    @Value("${delivery.nacos.namespace:}")
+    private String deliveryNacosNamespace;
+
+    @Value("${delivery.nacos.group:DEFAULT_GROUP}")
+    private String deliveryNacosGroup;
+
     /** buildkitd 状态缓存 PVC：跨 Job 复用基础镜像层，避免每次构建重拉基础镜像。 */
     public static final String BUILDKIT_CACHE_PVC_NAME = "buildkit-cache-pvc";
 
@@ -790,15 +799,19 @@ public class DevOpsService {
                     .inNamespace(ns).withName(deployName).get();
 
             if (deployment == null) {
-                run.addLog("[WARN] Deployment 不存在: " + deployName + ", 在命名空间: " + ns);
-                run.addLog("[INFO] 跳过部署步骤");
-                return true;
+                run.addLog("[ERROR] Deployment 不存在: " + deployName + ", 在命名空间: " + ns
+                        + "，无法部署；请先创建应用 Deployment");
+                return false;
             }
 
             // Update the first container's image
             var container = deployment.getSpec().getTemplate().getSpec().getContainers().get(0);
             container.setImage(fullImage);
             container.setImagePullPolicy("IfNotPresent"); // Force local image usage
+            if (config.isDeliveryManaged()) {
+                ensureDeliveryEnvironment(container);
+                run.addLog("[INFO] 已补齐交付应用 Nacos 连接配置（已有环境变量不覆盖）");
+            }
 
             client.apps().deployments().inNamespace(ns).resource(deployment).update();
             run.addLog("[INFO] ✓ Deployment 已更新: " + deployName + " -> " + fullImage);
@@ -819,6 +832,41 @@ public class DevOpsService {
 
     /** 部署后等待副本 Ready 的超时时间。 */
     private static final long DEPLOY_READY_TIMEOUT_MS = 180_000;
+
+    /** 交付应用仅补齐缺失的 Nacos 连接参数，已有值及 Secret 引用均保留。 */
+    static void ensureDeliveryEnvironment(Container container, String serverAddr,
+            String namespace, String group) {
+        List<EnvVar> env = container.getEnv() == null ? new ArrayList<>() : container.getEnv();
+        addEnvIfAbsent(env, "NACOS_ENABLED", "true");
+        addEnvIfAbsent(env, "NACOS_SERVER_ADDR", serverAddr);
+        addEnvIfAbsent(env, "NACOS_NAMESPACE", namespace);
+        addEnvIfAbsent(env, "NACOS_GROUP", group);
+        addSecretEnvIfAbsent(env, "NACOS_USERNAME", "username");
+        addSecretEnvIfAbsent(env, "NACOS_PASSWORD", "password");
+        container.setEnv(env);
+    }
+
+    private void ensureDeliveryEnvironment(Container container) {
+        ensureDeliveryEnvironment(container, deliveryNacosServerAddr,
+                deliveryNacosNamespace, deliveryNacosGroup);
+    }
+
+    static void addEnvIfAbsent(List<EnvVar> env, String name, String value) {
+        if (env.stream().noneMatch(item -> name.equals(item.getName()))) {
+            env.add(new EnvVar(name, value, null));
+        }
+    }
+
+    static void addSecretEnvIfAbsent(List<EnvVar> env, String name, String key) {
+        if (env.stream().noneMatch(item -> name.equals(item.getName()))) {
+            env.add(new EnvVarBuilder()
+                    .withName(name)
+                    .withNewValueFrom()
+                    .withNewSecretKeyRef(key, "nacos-auth", false)
+                    .endValueFrom()
+                    .build());
+        }
+    }
 
     /**
      * 轮询等待 Deployment 副本 Ready（readyReplicas >= desired）。

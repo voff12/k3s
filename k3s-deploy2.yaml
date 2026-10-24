@@ -82,9 +82,9 @@ spec:
             # spring.cloud.nacos.config.enabled 默认 false，缺失则整个 Nacos 客户端不激活（零 Nacos 日志）
             - name: NACOS_ENABLED
               value: "true"
-            # 对应 k8s/nacos.yaml 中 Service metadata.name: nacos-svc（集群内 DNS）
+            # 以集群实际 Service metadata.name: nacos 为准
             - name: NACOS_SERVER_ADDR
-              value: "nacos-svc.default.svc.cluster.local:8848"
+              value: "nacos.default.svc.cluster.local:8848"
             # 命名空间留空 = public（"public" 不是合法 namespace ID，显式传会查不到配置）
             - name: NACOS_NAMESPACE
               value: ""

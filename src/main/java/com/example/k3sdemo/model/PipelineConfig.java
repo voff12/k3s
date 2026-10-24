@@ -17,6 +17,8 @@ public class PipelineConfig {
     private String imageTag = "latest";
     private String namespace = "default";
     private String deploymentName;
+    /** 是否由交付中心管理，决定是否补齐应用运行环境。 */
+    private boolean deliveryManaged;
     private String dockerfilePath = "./Dockerfile";
     private String gitToken;
     private String buildCommand = "mvn clean package -DskipTests";
@@ -99,6 +101,14 @@ public class PipelineConfig {
 
     public void setDeploymentName(String deploymentName) {
         this.deploymentName = deploymentName;
+    }
+
+    public boolean isDeliveryManaged() {
+        return deliveryManaged;
+    }
+
+    public void setDeliveryManaged(boolean deliveryManaged) {
+        this.deliveryManaged = deliveryManaged;
     }
 
     public String getDockerfilePath() {

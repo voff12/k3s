@@ -30,6 +30,7 @@ public class BuildKitPipelineTrigger implements PipelineTrigger {
         config.setImageName(imageName);
         config.setImageTag("rel-" + System.currentTimeMillis());
         config.setDeploymentName(deployment);
+        config.setDeliveryManaged(true);
         config.setNamespace(namespace != null && !namespace.isBlank() ? namespace : "default");
         config.setRuntime("auto");
         try {
