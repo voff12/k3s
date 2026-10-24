@@ -101,7 +101,7 @@
       <section class="view" id="view-quality">
         <div class="page-head"><div><div class="eyebrow">SERVICE RELIABILITY</div><h1 class="page-title">运行质量</h1><div class="page-subtitle">集群真实健康问题与 SLO 配置状态。</div></div><div class="head-tools"><button class="btn" onclick="loadCluster(true)">重新扫描</button></div></div>
         <div class="grid stats" id="qualityStats"></div>
-        <div class="grid panels"><div class="card"><div class="panel-head"><div><div class="panel-title">集群健康问题</div><div class="panel-sub">来自集群实时扫描</div></div></div><div class="quality-list" id="qualityIssueList"></div></div><div class="card"><div class="panel-head"><div><div class="panel-title">服务 SLO</div><div class="panel-sub" id="sloSub">Prometheus 指标</div></div></div><div class="quality-list" id="sloMetricList"></div></div></div>
+        <div class="grid panels"><div class="card"><div class="panel-head"><div><div class="panel-title">集群健康问题</div><div class="panel-sub">来自集群实时扫描</div></div></div><div class="quality-list" id="qualityIssueList"></div><div class="pagination" id="qualityIssuePagination" role="navigation" aria-label="集群健康问题分页" hidden></div></div><div class="card"><div class="panel-head"><div><div class="panel-title">服务 SLO</div><div class="panel-sub" id="sloSub">Prometheus 指标</div></div></div><div class="quality-list" id="sloMetricList"></div></div></div>
       </section>
       <section class="view" id="view-cluster">
         <div class="page-head"><div><div class="eyebrow">KUBERNETES OPERATIONS</div><h1 class="page-title">集群运维</h1><div class="page-subtitle">集群健康与工作负载入口。具体操作沿用现有运维页面。</div></div><div class="head-tools"><a class="btn" href="/dashboard">旧版总览 ↗</a></div></div>
@@ -424,23 +424,48 @@
         '<div class="card cluster-card"><h3>工作负载</h3><div class="cluster-num">'+workload+'</div><div class="cluster-note">Pod '+pods+'</div></div>'+
         '<div class="card cluster-card"><h3>健康问题</h3><div class="cluster-num">'+issues+'</div><div class="cluster-note">Pod '+(s.podIssueCount||0)+' · Workload '+(s.deploymentIssueCount||0)+' · Node '+(s.nodeIssueCount||0)+'</div></div>';
     }
+    const QUALITY_PAGE_SIZE=10;
+    let qualityPage=1,qualityIssueRows=[];
+    function renderQualityPagination(total,pageCount){
+      const pagination=document.getElementById('qualityIssuePagination');
+      pagination.hidden=total===0;
+      if(pagination.hidden){pagination.innerHTML='';return}
+      const start=(qualityPage-1)*QUALITY_PAGE_SIZE+1;
+      const end=Math.min(qualityPage*QUALITY_PAGE_SIZE,total);
+      const buttons=Array.from({length:pageCount},(_,i)=>'<button type="button" class="page-btn'+(qualityPage===i+1?' active':'')+'" data-quality-page="'+(i+1)+'"'+(qualityPage===i+1?' aria-current="page"':'')+' aria-label="第 '+(i+1)+' 页" onclick="goToQualityPage('+(i+1)+')">'+(i+1)+'</button>').join('');
+      pagination.innerHTML='<span class="pagination-summary" aria-live="polite">第 '+start+'-'+end+' 条 / 共 '+total+' 条</span><div class="pagination-controls"><button type="button" class="page-btn" aria-label="上一页" onclick="goToQualityPage('+(qualityPage-1)+')" '+(qualityPage===1?'disabled':'')+'>上一页</button>'+buttons+'<button type="button" class="page-btn" aria-label="下一页" onclick="goToQualityPage('+(qualityPage+1)+')" '+(qualityPage===pageCount?'disabled':'')+'>下一页</button></div>';
+    }
+    function renderQualityIssues(){
+      const total=qualityIssueRows.length;
+      const pageCount=Math.max(1,Math.ceil(total/QUALITY_PAGE_SIZE));
+      qualityPage=Math.min(Math.max(1,qualityPage),pageCount);
+      const pageStart=(qualityPage-1)*QUALITY_PAGE_SIZE;
+      document.getElementById('qualityIssueList').innerHTML=qualityIssueRows.slice(pageStart,pageStart+QUALITY_PAGE_SIZE).join('')||emptyList('集群扫描无异常 ✨');
+      renderQualityPagination(total,pageCount);
+    }
+    function goToQualityPage(page){qualityPage=page;renderQualityIssues()}
     function renderQuality(s){
       const stats=document.getElementById('qualityStats');
-      const list=document.getElementById('qualityIssueList');
-      if(!s||s.success===false){stats.innerHTML=statCard('集群状态','—','扫描失败，请检查集群连接');list.innerHTML=emptyList('集群不可达');return}
+      qualityPage=1;
+      qualityIssueRows=[];
+      if(!s||s.success===false){
+        stats.innerHTML=statCard('集群状态','—','扫描失败，请检查集群连接');
+        document.getElementById('qualityIssueList').innerHTML=emptyList('集群不可达');
+        renderQualityPagination(0,1);
+        return;
+      }
       stats.innerHTML=
         statCard('节点',s.readyNodes+'/'+s.totalNodes,'Ready')+
         statCard('运行 Pod',s.runningPods+'/'+s.totalPods,'集群实时状态')+
         statCard('Deployments',s.totalDeployments,'工作负载总数')+
         statCard('健康问题',(s.podIssueCount||0)+(s.deploymentIssueCount||0)+(s.nodeIssueCount||0),'需关注项');
-      const rows=[];
-      (s.podIssues||[]).forEach(p=>rows.push('<div class="quality-item"><div><b>'+pill('red','Pod')+' '+esc(p.namespace)+'/'+esc(p.name)+'</b><small>状态 '+esc(p.phase)+' · 重启 '+p.restarts+' 次'+(p.oomKilled?' · OOMKilled':'')+'</small></div><span class="pill amber">需关注</span></div>'));
-      (s.deploymentIssues||[]).slice(0,8).forEach(d=>{
+      (s.podIssues||[]).forEach(p=>qualityIssueRows.push('<div class="quality-item"><div><b>'+pill('red','Pod')+' '+esc(p.namespace)+'/'+esc(p.name)+'</b><small>状态 '+esc(p.phase)+' · 重启 '+p.restarts+' 次'+(p.oomKilled?' · OOMKilled':'')+'</small></div><span class="pill amber">需关注</span></div>'));
+      (s.deploymentIssues||[]).forEach(d=>{
         const tags=[d.singleReplica?'单副本':'',d.missingResourceRequests?'缺 requests':'',d.missingResourceLimits?'缺 limits':'',d.missingReadinessProbe?'缺就绪探针':'',d.missingLivenessProbe?'缺存活探针':'',d.missingPdb?'缺 PDB':''].filter(Boolean);
-        rows.push('<div class="quality-item"><div><b>'+pill('amber','Workload')+' '+esc(d.namespace)+'/'+esc(d.name)+'</b><small>'+esc(tags.join(' · ')||'配置建议')+'</small></div><span class="pill amber">建议</span></div>');
+        qualityIssueRows.push('<div class="quality-item"><div><b>'+pill('amber','Workload')+' '+esc(d.namespace)+'/'+esc(d.name)+'</b><small>'+esc(tags.join(' · ')||'配置建议')+'</small></div><span class="pill amber">建议</span></div>');
       });
-      (s.nodeIssues||[]).forEach(n=>rows.push('<div class="quality-item"><div><b>'+pill('red','Node')+' '+esc(n.name)+'</b><small>'+esc([!n.ready?'NotReady':'',n.memoryPressure?'内存压力':'',n.diskPressure?'磁盘压力':'',n.pidPressure?'PID 压力':''].filter(Boolean).join(' · ')||'异常')+'</small></div><span class="pill red">异常</span></div>'));
-      list.innerHTML=rows.join('')||emptyList('集群扫描无异常 ✨');
+      (s.nodeIssues||[]).forEach(n=>qualityIssueRows.push('<div class="quality-item"><div><b>'+pill('red','Node')+' '+esc(n.name)+'</b><small>'+esc([!n.ready?'NotReady':'',n.memoryPressure?'内存压力':'',n.diskPressure?'磁盘压力':'',n.pidPressure?'PID 压力':''].filter(Boolean).join(' · ')||'异常')+'</small></div><span class="pill red">异常</span></div>'));
+      renderQualityIssues();
     }
     function renderPreviews(list){
       const box=document.getElementById('previewEnvList');
