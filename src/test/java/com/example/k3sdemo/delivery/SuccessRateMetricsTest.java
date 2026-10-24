@@ -5,7 +5,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -31,25 +31,41 @@ class SuccessRateMetricsTest {
     private static final java.util.List<String> receivedQueries =
             java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
+    // @DynamicPropertySource 在 @BeforeAll 之前执行，server 必须先在此处创建并 start，
+    // 否则注册 prometheus.url 时 server 为 null（Boot 4 下时序更严格，暴露此问题）。
+    private static void ensureServerStarted() {
+        if (server != null) {
+            return;
+        }
+        try {
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            // 默认 executor 串行处理请求；被测代码并发发 instant+range 查询，
+            // 串行处理会阻塞致 WebClient 4s 超时返回 null，故用线程池并发处理。
+            server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+            // instant 查询：返回成功率标量 99.85
+            server.createContext("/api/v1/query", exchange -> {
+                receivedQueries.add(exchange.getRequestURI().getQuery());
+                byte[] body = ("{\"status\":\"success\",\"data\":{\"result\":[{\"metric\":{},"
+                        + "\"value\":[1730000000,\"99.85\"]}]}}").getBytes(StandardCharsets.UTF_8);
+                respond(exchange, body);
+            });
+            // range 查询：返回 3 个趋势点（含一个 NaN 验证过滤）
+            server.createContext("/api/v1/query_range", exchange -> {
+                receivedQueries.add(exchange.getRequestURI().getQuery());
+                byte[] body = ("{\"status\":\"success\",\"data\":{\"result\":[{\"metric\":{},"
+                        + "\"values\":[[1729990000,\"99.80\"],[1729993600,\"NaN\"],[1729997200,\"99.90\"]]}]}}")
+                        .getBytes(StandardCharsets.UTF_8);
+                respond(exchange, body);
+            });
+            server.start();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("启动假 Prometheus 失败", e);
+        }
+    }
+
     @BeforeAll
-    static void startFakePrometheus() throws Exception {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        // instant 查询：返回成功率标量 99.85
-        server.createContext("/api/v1/query", exchange -> {
-            receivedQueries.add(exchange.getRequestURI().getQuery());
-            byte[] body = ("{\"status\":\"success\",\"data\":{\"result\":[{\"metric\":{},"
-                    + "\"value\":[1730000000,\"99.85\"]}]}}").getBytes(StandardCharsets.UTF_8);
-            respond(exchange, body);
-        });
-        // range 查询：返回 3 个趋势点（含一个 NaN 验证过滤）
-        server.createContext("/api/v1/query_range", exchange -> {
-            receivedQueries.add(exchange.getRequestURI().getQuery());
-            byte[] body = ("{\"status\":\"success\",\"data\":{\"result\":[{\"metric\":{},"
-                    + "\"values\":[[1729990000,\"99.80\"],[1729993600,\"NaN\"],[1729997200,\"99.90\"]]}]}}")
-                    .getBytes(StandardCharsets.UTF_8);
-            respond(exchange, body);
-        });
-        server.start();
+    static void startFakePrometheus() {
+        ensureServerStarted();
     }
 
     private static void respond(com.sun.net.httpserver.HttpExchange exchange, byte[] body) throws java.io.IOException {
@@ -69,6 +85,7 @@ class SuccessRateMetricsTest {
 
     @DynamicPropertySource
     static void prometheusUrl(DynamicPropertyRegistry registry) {
+        ensureServerStarted();
         registry.add("prometheus.url",
                 () -> "http://127.0.0.1:" + server.getAddress().getPort());
     }

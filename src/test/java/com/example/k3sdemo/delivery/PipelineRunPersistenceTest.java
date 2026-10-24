@@ -30,6 +30,13 @@ class PipelineRunPersistenceTest {
     @Autowired
     private PipelineRunRepository pipelineRunRepository;
 
+    // onCompleted 用 REQUIRES_NEW 独立事务提交，绕过本类 @Transactional 的回滚，
+    // 全量跑时会读到其他用例/测试类残留数据，故每个用例前清表保证隔离。
+    @org.junit.jupiter.api.BeforeEach
+    void cleanTable() {
+        pipelineRunRepository.deleteAll();
+    }
+
     private PipelineRun newRun() {
         PipelineConfig config = new PipelineConfig();
         config.setGitUrl("https://git.example.com/demo/app.git");

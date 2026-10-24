@@ -5,7 +5,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -33,21 +33,37 @@ class MetricsQueryEncodingTest {
     private static final java.util.List<String> receivedQueries =
             java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
+    // @DynamicPropertySource 在 @BeforeAll 之前执行，server 必须先在此处创建并 start，
+    // 否则注册 prometheus.url 时 server 为 null（Boot 4 下时序更严格，暴露此问题）。
+    private static void ensureServerStarted() {
+        if (server != null) {
+            return;
+        }
+        try {
+            server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            // 默认 executor 串行处理请求；被测代码并发发多个 instant 查询，
+            // 串行处理会阻塞致 WebClient 4s 超时返回 null，故用线程池并发处理。
+            server.setExecutor(java.util.concurrent.Executors.newCachedThreadPool());
+            server.createContext("/api/v1/query", exchange -> {
+                receivedQueries.add(exchange.getRequestURI().getQuery());
+                String val = "12.34";
+                byte[] body = ("{\"status\":\"success\",\"data\":{\"result\":[{\"metric\":{},\"value\":[1730000000,\""
+                        + val + "\"]}]}}").getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "application/json");
+                exchange.sendResponseHeaders(200, body.length);
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(body);
+                }
+            });
+            server.start();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("启动假 Prometheus 失败", e);
+        }
+    }
+
     @BeforeAll
-    static void startFakePrometheus() throws Exception {
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        server.createContext("/api/v1/query", exchange -> {
-            receivedQueries.add(exchange.getRequestURI().getQuery());
-            String val = "12.34";
-            byte[] body = ("{\"status\":\"success\",\"data\":{\"result\":[{\"metric\":{},\"value\":[1730000000,\""
-                    + val + "\"]}]}}").getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(body);
-            }
-        });
-        server.start();
+    static void startFakePrometheus() {
+        ensureServerStarted();
     }
 
     @AfterAll
@@ -59,6 +75,7 @@ class MetricsQueryEncodingTest {
 
     @DynamicPropertySource
     static void prometheusUrl(DynamicPropertyRegistry registry) {
+        ensureServerStarted();
         registry.add("prometheus.url",
                 () -> "http://127.0.0.1:" + server.getAddress().getPort());
     }
