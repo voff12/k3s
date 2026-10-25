@@ -41,4 +41,37 @@ class DeploymentTemplateServiceTest {
         String json = mapper.writeValueAsString(template);
         assertThat(json).contains("app-db").doesNotContain("secret-value");
     }
+
+    @Test
+    void ingressValidationRejectsBadHostAndPrefix() {
+        DeploymentTemplate template = new DeploymentTemplate();
+        template.getIngress().setEnabled(true);
+        template.getIngress().setHost("bad host!");
+        assertThatThrownBy(template::validate).isInstanceOf(IllegalArgumentException.class);
+        template.getIngress().setHost("pay.example.com");
+        template.getIngress().getPathPrefixes().clear();
+        assertThatThrownBy(template::validate).isInstanceOf(IllegalArgumentException.class);
+        template.getIngress().getPathPrefixes().add("/api");
+        template.getIngress().getAnnotations().put("nginx.ingress.kubernetes.io/rew", "x");
+        assertThatThrownBy(template::validate).isInstanceOf(IllegalArgumentException.class);
+        template.getIngress().getAnnotations().clear();
+        template.validate();
+    }
+
+    @Test
+    void ingressMergedIntoBaseTemplate() {
+        DeploymentTemplate base = new DeploymentTemplate();
+        DeploymentTemplate override = new DeploymentTemplate();
+        override.getIngress().setEnabled(true);
+        override.getIngress().setHost("pay.example.com");
+        override.getIngress().getPathPrefixes().clear();
+        override.getIngress().getPathPrefixes().add("/api");
+        override.getIngress().getAnnotations().put("traefik.ingress.kubernetes.io/router.entrypoints", "websecure");
+        com.example.k3sdemo.delivery.service.DeploymentTemplateService.merge(base, override);
+        assertThat(base.getIngress().getEnabled()).isTrue();
+        assertThat(base.getIngress().getHost()).isEqualTo("pay.example.com");
+        assertThat(base.getIngress().getPathPrefixes()).containsExactly("/api");
+        assertThat(base.getIngress().getAnnotations())
+                .containsEntry("traefik.ingress.kubernetes.io/router.entrypoints", "websecure");
+    }
 }

@@ -1,5 +1,8 @@
 package com.example.k3sdemo.delivery.service;
 
+import com.example.k3sdemo.delivery.dto.PolicyTemplateConfig;
+import com.example.k3sdemo.delivery.entity.ReleaseApproval;
+import com.example.k3sdemo.delivery.repository.ReleaseApprovalRepository;
 import com.example.k3sdemo.delivery.entity.Application;
 import com.example.k3sdemo.delivery.entity.Artifact;
 import com.example.k3sdemo.delivery.entity.Release;
@@ -41,6 +44,8 @@ public class ReleaseExecutionService {
     private final PipelineTrigger pipelineTrigger;
     private final ActivityLogService activityLog;
     private final DeploymentTemplateService deploymentTemplateService;
+    private final PolicyTemplateService policyTemplateService;
+    private final ReleaseApprovalRepository releaseApprovalRepository;
     private final ExecutorService pollExecutor = Executors.newFixedThreadPool(2);
 
     /** releaseId → pipelineId，供页面关联流水线日志 */
@@ -52,7 +57,9 @@ public class ReleaseExecutionService {
                                    ArtifactRepository artifactRepository,
                                    PipelineTrigger pipelineTrigger,
                                    ActivityLogService activityLog,
-                                   DeploymentTemplateService deploymentTemplateService) {
+                                   DeploymentTemplateService deploymentTemplateService,
+                                   PolicyTemplateService policyTemplateService,
+                                   ReleaseApprovalRepository releaseApprovalRepository) {
         this.releaseRepository = releaseRepository;
         this.persistenceService = persistenceService;
         this.applicationRepository = applicationRepository;
@@ -60,6 +67,41 @@ public class ReleaseExecutionService {
         this.pipelineTrigger = pipelineTrigger;
         this.activityLog = activityLog;
         this.deploymentTemplateService = deploymentTemplateService;
+        this.policyTemplateService = policyTemplateService;
+        this.releaseApprovalRepository = releaseApprovalRepository;
+    }
+
+    /**
+     * 审批决策（设计 3.3）：approve → 置 APPROVED 并自动重触发 execute（放行门）；
+     * reject → 置 REJECTED，发布标记 FAILED 终止。
+     */
+    public Release decide(Long releaseId, String gate, boolean approve, String approver, String comment) {
+        Release release = releaseRepository.findById(releaseId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "发布不存在: " + releaseId));
+        ReleaseApproval approval = releaseApprovalRepository
+                .findByReleaseIdAndGateAndStatus(releaseId, gate, "PENDING")
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "无待审批记录: release=" + releaseId + " gate=" + gate));
+        if (approver != null && release.getOperator() != null && approver.equals(release.getOperator())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "发起人不能自审自批");
+        }
+        approval.setStatus(approve ? "APPROVED" : "REJECTED");
+        approval.setApprover(approver);
+        approval.setComment(comment);
+        approval.setDecidedAt(LocalDateTime.now());
+        releaseApprovalRepository.save(approval);
+        activityLog.log(release.getAppId(), releaseId, "USER", approver,
+                approve ? "APPROVAL_GRANTED" : "APPROVAL_REJECTED",
+                (approve ? "审批通过 gate=" : "审批驳回 gate=") + gate
+                        + (comment != null ? "，意见: " + comment : ""), release.getEnv());
+        if (!approve) {
+            release.setStatus(Release.Status.FAILED.name());
+            release.setCurrentStage("APPROVAL_REJECTED");
+            release.setFinishedAt(LocalDateTime.now());
+            releaseRepository.save(release);
+            return release;
+        }
+        return execute(releaseId);
     }
 
     /** 触发执行：校验状态并启动流水线，立即返回。 */
@@ -75,6 +117,35 @@ public class ReleaseExecutionService {
         if (activePipelines.containsKey(releaseId)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "该发布已有流水线在执行中");
         }
+
+        // 策略模板审批门（设计 3.3 第一层）：PROD 发布且模板要求人工批准 → 挂起等待审批
+        if ("PROD".equals(release.getEnv())) {
+            PolicyTemplateConfig policy = policyTemplateService.resolveForApp(release.getAppId());
+            if (policy != null && policy.isRequireProdApproval()) {
+                boolean alreadyApproved = releaseApprovalRepository
+                        .findByReleaseIdAndGateAndStatus(releaseId, "PROD_START", "APPROVED")
+                        .isPresent();
+                if (!alreadyApproved) {
+                    boolean pendingExists = releaseApprovalRepository
+                            .findByReleaseIdAndGateAndStatus(releaseId, "PROD_START", "PENDING")
+                            .isPresent();
+                    if (!pendingExists) {
+                        ReleaseApproval approval = new ReleaseApproval();
+                        approval.setReleaseId(releaseId);
+                        approval.setGate("PROD_START");
+                        approval.setRequester(release.getOperator());
+                        releaseApprovalRepository.save(approval);
+                    }
+                    release.setStatus(Release.Status.PENDING.name());
+                    release.setCurrentStage("AWAITING_APPROVAL");
+                    releaseRepository.save(release);
+                    activityLog.log(release.getAppId(), releaseId, "SYSTEM", null,
+                            "AWAITING_APPROVAL", "PROD 发布等待人工审批（策略模板要求）", release.getEnv());
+                    return release;
+                }
+            }
+        }
+
         Artifact artifact = artifactRepository.findById(release.getArtifactId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "制品不存在: " + release.getArtifactId()));

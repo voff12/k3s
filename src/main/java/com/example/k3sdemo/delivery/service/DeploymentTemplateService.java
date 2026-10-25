@@ -82,5 +82,22 @@ public class DeploymentTemplateService {
         base.getEnv().putAll(override.getEnv());
         base.getSecretEnv().putAll(override.getSecretEnv());
         base.getEnvFrom().addAll(override.getEnvFrom());
+        if (override.getIngress() != null) {
+            DeploymentTemplate.IngressConfig baseIngress = base.getIngress();
+            DeploymentTemplate.IngressConfig extra = override.getIngress();
+            if (baseIngress == null) {
+                base.setIngress(extra);
+            } else {
+                if (extra.getEnabled() != null) baseIngress.setEnabled(extra.getEnabled());
+                if (extra.getClassName() != null) baseIngress.setClassName(extra.getClassName());
+                if (extra.getHost() != null) baseIngress.setHost(extra.getHost());
+                if (extra.getPathPrefixes() != null && !extra.getPathPrefixes().isEmpty()) {
+                    baseIngress.setPathPrefixes(new java.util.ArrayList<>(extra.getPathPrefixes()));
+                }
+                if (extra.getTlsEnabled() != null) baseIngress.setTlsEnabled(extra.getTlsEnabled());
+                if (extra.getTlsSecretRef() != null) baseIngress.setTlsSecretRef(extra.getTlsSecretRef());
+                if (extra.getAnnotations() != null) baseIngress.getAnnotations().putAll(extra.getAnnotations());
+            }
+        }
     }
 }

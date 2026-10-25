@@ -10,6 +10,9 @@ public interface ApplicationRepository extends JpaRepository<Application, Long> 
 
     Optional<Application> findByCode(String code);
 
+    /** 引用计数：删除策略模板前的保护检查 */
+    long countByPolicyTemplateId(Long policyTemplateId);
+
     /** 目录列表：只含未停用应用，按团队过滤可选 */
     List<Application> findByStatusOrderByUpdatedAtDesc(String status);
 

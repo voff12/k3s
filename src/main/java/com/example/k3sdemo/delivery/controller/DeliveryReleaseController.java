@@ -65,4 +65,30 @@ public class DeliveryReleaseController {
     public ApiResponse<Release> execute(@PathVariable Long id) {
         return ApiResponse.ok(executionService.execute(id));
     }
+
+    /**
+     * 审批决策（设计 3.3）：通过后自动放行继续执行；驳回则发布终止。
+     * body: { "gate": "PROD_START", "approve": true, "approver": "alice", "comment": "同意" }
+     */
+    @PostMapping("/{id}/approval")
+    public ApiResponse<Release> decide(@PathVariable Long id, @RequestBody ApprovalDecisionRequest req) {
+        return ApiResponse.ok(executionService.decide(
+                id, req.getGate(), req.isApprove(), req.getApprover(), req.getComment()));
+    }
+
+    public static class ApprovalDecisionRequest {
+        private String gate = "PROD_START";
+        private boolean approve;
+        private String approver;
+        private String comment;
+
+        public String getGate() { return gate; }
+        public void setGate(String gate) { this.gate = gate; }
+        public boolean isApprove() { return approve; }
+        public void setApprove(boolean approve) { this.approve = approve; }
+        public String getApprover() { return approver; }
+        public void setApprover(String approver) { this.approver = approver; }
+        public String getComment() { return comment; }
+        public void setComment(String comment) { this.comment = comment; }
+    }
 }

@@ -12,6 +12,7 @@ public class DeploymentTemplate {
     private Map<String, String> env = new LinkedHashMap<>();
     private Map<String, SecretRef> secretEnv = new LinkedHashMap<>();
     private java.util.List<String> envFrom = new java.util.ArrayList<>();
+    private IngressConfig ingress = new IngressConfig();
 
     public Boolean getEnabled() { return enabled; }
     public void setEnabled(Boolean enabled) { this.enabled = enabled; }
@@ -23,6 +24,33 @@ public class DeploymentTemplate {
     public void setEnv(Map<String, String> env) { this.env = env; }
     public Map<String, SecretRef> getSecretEnv() { return secretEnv; }
     public void setSecretEnv(Map<String, SecretRef> secretEnv) { this.secretEnv = secretEnv; }
+    public IngressConfig getIngress() { return ingress; }
+    public void setIngress(IngressConfig ingress) { this.ingress = ingress; }
+
+    /** Ingress 路由配置（设计 4.1）：host 白名单后缀、annotations 白名单前缀。 */
+    public static class IngressConfig {
+        private Boolean enabled = false;
+        private String className = "";
+        private String host;
+        private java.util.List<String> pathPrefixes = new java.util.ArrayList<>(java.util.List.of("/"));
+        private Boolean tlsEnabled = false;
+        private String tlsSecretRef = "";
+        private Map<String, String> annotations = new LinkedHashMap<>();
+        public Boolean getEnabled() { return enabled; }
+        public void setEnabled(Boolean enabled) { this.enabled = enabled; }
+        public String getClassName() { return className; }
+        public void setClassName(String className) { this.className = className; }
+        public String getHost() { return host; }
+        public void setHost(String host) { this.host = host; }
+        public java.util.List<String> getPathPrefixes() { return pathPrefixes; }
+        public void setPathPrefixes(java.util.List<String> pathPrefixes) { this.pathPrefixes = pathPrefixes; }
+        public Boolean getTlsEnabled() { return tlsEnabled; }
+        public void setTlsEnabled(Boolean tlsEnabled) { this.tlsEnabled = tlsEnabled; }
+        public String getTlsSecretRef() { return tlsSecretRef; }
+        public void setTlsSecretRef(String tlsSecretRef) { this.tlsSecretRef = tlsSecretRef; }
+        public Map<String, String> getAnnotations() { return annotations; }
+        public void setAnnotations(Map<String, String> annotations) { this.annotations = annotations; }
+    }
 
     public static class NacosConfig {
         private Boolean enabled = false;
@@ -77,6 +105,29 @@ public class DeploymentTemplate {
             if (isBlank(nacos.getServerAddr())) throw new IllegalArgumentException("Nacos serverAddr 不能为空");
             if (isBlank(nacos.getDataId())) throw new IllegalArgumentException("Nacos dataId 不能为空");
             if (isBlank(nacos.getAuthSecretRef())) throw new IllegalArgumentException("Nacos authSecretRef 不能为空");
+        }
+        if (ingress != null && Boolean.TRUE.equals(ingress.getEnabled())) {
+            if (isBlank(ingress.getHost()) || !ingress.getHost().matches("[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?")) {
+                throw new IllegalArgumentException("Ingress host 不能为空且须为合法域名");
+            }
+            if (ingress.getPathPrefixes() == null || ingress.getPathPrefixes().isEmpty()) {
+                throw new IllegalArgumentException("Ingress pathPrefixes 不能为空");
+            }
+            for (String prefix : ingress.getPathPrefixes()) {
+                if (prefix == null || !prefix.startsWith("/")) {
+                    throw new IllegalArgumentException("Ingress pathPrefix 须以 / 开头: " + prefix);
+                }
+            }
+            if (Boolean.TRUE.equals(ingress.getTlsEnabled()) && isBlank(ingress.getTlsSecretRef())) {
+                throw new IllegalArgumentException("Ingress tlsSecretRef 不能为空");
+            }
+            if (ingress.getAnnotations() != null) {
+                ingress.getAnnotations().forEach((k, v) -> {
+                    if (isBlank(k) || !k.startsWith("traefik.")) {
+                        throw new IllegalArgumentException("仅允许 traefik. 前缀的 annotation: " + k);
+                    }
+                });
+            }
         }
     }
 

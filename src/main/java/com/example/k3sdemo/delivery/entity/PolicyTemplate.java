@@ -38,6 +38,14 @@ public class PolicyTemplate {
     @Column(name = "config_json", nullable = false, columnDefinition = "json")
     private String configJson;
 
+    /** 内置三档（LOW/STANDARD/HIGH）：不可删除、不可改 code */
+    @Column(nullable = false)
+    private Boolean builtin = false;
+
+    /** 软删除：列表与选用均不可见 */
+    @Column(nullable = false)
+    private Boolean deleted = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -65,6 +73,10 @@ public class PolicyTemplate {
     public void setDescription(String description) { this.description = description; }
     public String getConfigJson() { return configJson; }
     public void setConfigJson(String configJson) { this.configJson = configJson; }
+    public Boolean getBuiltin() { return builtin; }
+    public void setBuiltin(Boolean builtin) { this.builtin = builtin; }
+    public Boolean getDeleted() { return deleted; }
+    public void setDeleted(Boolean deleted) { this.deleted = deleted; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
 }

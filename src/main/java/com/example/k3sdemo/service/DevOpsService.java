@@ -820,6 +820,13 @@ public class DevOpsService {
             // Deployment 存在但 Service 缺失时补建, 已存在则不动)
             ensureService(client, ns, deployName, config.getEffectiveAppPort(), run);
 
+            // 部署模板开启 Ingress 时同步路由（设计 4.2）：仅管理归属本应用的 Ingress
+            com.example.k3sdemo.delivery.dto.DeploymentTemplate templateCfg = config.getDeploymentTemplate();
+            if (templateCfg != null && templateCfg.getIngress() != null
+                    && Boolean.TRUE.equals(templateCfg.getIngress().getEnabled())) {
+                ensureIngress(client, ns, deployName, config.getEffectiveAppPort(), run, templateCfg.getIngress());
+            }
+
             // 部署后必须确认副本 Ready, 不再盲等 (对齐 ReleaseService.waitForDeploymentReady)
             return waitForDeploymentReady(client, ns, deployName, DEPLOY_READY_TIMEOUT_MS, run);
 
@@ -1017,6 +1024,78 @@ public class DevOpsService {
         } catch (Exception e) {
             run.addLog("[WARN] Service 创建/检查失败: " + e.getMessage());
             broadcastLog(run);
+        }
+    }
+
+    /**
+     * Ingress 路由同步（设计 4.2）：不存在则按模板创建；已存在且归属本应用（managed-by 标签）
+     * 则按模板覆盖 spec；他人管理的 Ingress 一律不动。Ingress 名称/namespace 与 Deployment 同名。
+     */
+    private void ensureIngress(KubernetesClient client, String namespace, String deployName,
+            int appPort, PipelineRun run, com.example.k3sdemo.delivery.dto.DeploymentTemplate.IngressConfig cfg) {
+        try {
+            io.fabric8.kubernetes.api.model.networking.v1.Ingress existing =
+                    client.network().v1().ingresses().inNamespace(namespace).withName(deployName).get();
+            if (existing != null && !"lingxi-delivery".equals(
+                    existing.getMetadata().getLabels().get("app.kubernetes.io/managed-by"))) {
+                run.addLog("[WARN] Ingress " + deployName + " 存在但非本平台管理，跳过（不覆盖他人配置）");
+                return;
+            }
+            io.fabric8.kubernetes.api.model.networking.v1.HTTPIngressRuleValueBuilder httpBuilder =
+                    new io.fabric8.kubernetes.api.model.networking.v1.HTTPIngressRuleValueBuilder();
+            for (String prefix : cfg.getPathPrefixes()) {
+                httpBuilder = httpBuilder.addNewPath()
+                        .withPath(prefix)
+                        .withPathType("Prefix")
+                        .withNewBackend()
+                            .withNewService()
+                                .withName(deployName)
+                                .withNewPort().withNumber(appPort).endPort()
+                            .endService()
+                        .endBackend()
+                    .endPath();
+            }
+            io.fabric8.kubernetes.api.model.networking.v1.IngressSpecBuilder specBuilder =
+                    new io.fabric8.kubernetes.api.model.networking.v1.IngressSpecBuilder();
+            if (cfg.getClassName() != null && !cfg.getClassName().isBlank()) {
+                specBuilder = specBuilder.withIngressClassName(cfg.getClassName());
+            }
+            specBuilder = specBuilder.withRules(java.util.List.of(
+                    new io.fabric8.kubernetes.api.model.networking.v1.IngressRuleBuilder()
+                            .withHost(cfg.getHost())
+                            .withHttp(httpBuilder.build())
+                            .build()));
+            if (Boolean.TRUE.equals(cfg.getTlsEnabled()) && cfg.getTlsSecretRef() != null
+                    && !cfg.getTlsSecretRef().isBlank()) {
+                specBuilder = specBuilder.withTls(java.util.List.of(
+                        new io.fabric8.kubernetes.api.model.networking.v1.IngressTLSBuilder()
+                                .withHosts(java.util.List.of(cfg.getHost()))
+                                .withSecretName(cfg.getTlsSecretRef())
+                                .build()));
+            }
+            io.fabric8.kubernetes.api.model.networking.v1.Ingress target =
+                    new io.fabric8.kubernetes.api.model.networking.v1.IngressBuilder()
+                    .withNewMetadata()
+                        .withName(deployName)
+                        .withNamespace(namespace)
+                        .addToLabels("app", deployName)
+                        .addToLabels("app.kubernetes.io/managed-by", "lingxi-delivery")
+                    .endMetadata()
+                    .withSpec(specBuilder.build())
+                    .build();
+            if (cfg.getAnnotations() != null && !cfg.getAnnotations().isEmpty()) {
+                target.getMetadata().setAnnotations(new java.util.LinkedHashMap<>(cfg.getAnnotations()));
+            }
+            if (existing == null) {
+                client.network().v1().ingresses().inNamespace(namespace).resource(target).create();
+                run.addLog("[INFO] ✓ Ingress 已创建: " + cfg.getHost() + " → " + deployName + ":" + appPort);
+            } else {
+                target.getMetadata().setResourceVersion(existing.getMetadata().getResourceVersion());
+                client.network().v1().ingresses().inNamespace(namespace).resource(target).update();
+                run.addLog("[INFO] ✓ Ingress 已更新: " + cfg.getHost() + " → " + deployName + ":" + appPort);
+            }
+        } catch (Exception e) {
+            run.addLog("[WARN] Ingress 创建/更新失败: " + e.getMessage());
         }
     }
 
