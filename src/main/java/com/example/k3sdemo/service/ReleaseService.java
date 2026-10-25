@@ -969,6 +969,30 @@ public class ReleaseService {
     private static final long DEPLOY_READY_TIMEOUT_MS = 180_000;
 
     /**
+     * 更新 Deployment；409 时重新读取并重放镜像与拉取策略再试一次。
+     * 重放只覆盖本次发布改过的字段，避免把并发写入的其它变更冲掉。
+     */
+    private void updateDeployment(KubernetesClient client, String namespace, Deployment deployment) {
+        String name = deployment.getMetadata().getName();
+        Container edited = deployment.getSpec().getTemplate().getSpec().getContainers().get(0);
+        if (DevOpsService.updateDeploymentWithRetry(() ->
+                client.apps().deployments().inNamespace(namespace).resource(deployment).update())) {
+            return;
+        }
+        Deployment latest = client.apps().deployments().inNamespace(namespace).withName(name).get();
+        if (latest == null) {
+            throw new KubernetesClientException("conflict", 409, null);
+        }
+        Container target = latest.getSpec().getTemplate().getSpec().getContainers().get(0);
+        target.setImage(edited.getImage());
+        target.setImagePullPolicy(edited.getImagePullPolicy());
+        if (!DevOpsService.updateDeploymentWithRetry(() ->
+                client.apps().deployments().inNamespace(namespace).resource(latest).update())) {
+            throw new KubernetesClientException("conflict", 409, null);
+        }
+    }
+
+    /**
      * 轮询等待 Deployment 副本 Ready（readyReplicas >= desired）。
      * 超时、Deployment 取不到/被删或等待被中断都返回 false，并留下带原因的日志。
      */
@@ -996,6 +1020,9 @@ public class ReleaseService {
                         ? (fetchError != null ? "Deployment 查询失败: " + fetchError : "Deployment 不存在或已被删除")
                         : "副本 " + readyReplicasOf(current) + "/" + desiredReplicasOf(current) + " Ready 超时";
                 record.addLog("[ERROR] 副本未就绪: " + deployName + ", 原因: " + reason);
+                if (current != null) {
+                    DevOpsService.logNotReadyCause(client, namespace, current, record::addLog);
+                }
                 broadcastLog(record);
                 return false;
             }
@@ -1197,7 +1224,7 @@ public class ReleaseService {
                 broadcastLog(record);
             }
 
-            client.apps().deployments().inNamespace(ns).resource(deployment).update();
+            updateDeployment(client, ns, deployment);
             record.addLog("[INFO] ✓ Deployment 已更新: " + deployName + " → " + fullImage);
 
             ensureService(client, ns, deployName, config.getEffectiveAppPort(), record);
@@ -1289,7 +1316,7 @@ public class ReleaseService {
                 var container = existing.getSpec().getTemplate().getSpec().getContainers().get(0);
                 container.setImage(fullImage);
                 container.setImagePullPolicy("Always");
-                client.apps().deployments().inNamespace(previewNs).resource(existing).update();
+                updateDeployment(client, previewNs, existing);
                 record.addLog("[INFO] ✓ 已更新预览 Deployment: " + appName + " -> " + fullImage);
             }
             broadcastLog(record);

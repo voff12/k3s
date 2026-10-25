@@ -813,7 +813,7 @@ public class DevOpsService {
                 run.addLog("[INFO] 已应用部署模板（已有环境变量不覆盖）");
             }
 
-            client.apps().deployments().inNamespace(ns).resource(deployment).update();
+            updateDeployment(client, ns, deployment);
             run.addLog("[INFO] ✓ Deployment 已更新: " + deployName + " -> " + fullImage);
 
             // 确保应用有 NodePort Service 可对外访问 (对齐 ReleaseService.ensureService:
@@ -845,7 +845,9 @@ public class DevOpsService {
             String namespace, String group) {
         List<EnvVar> env = container.getEnv() == null ? new ArrayList<>() : container.getEnv();
         addEnvIfAbsent(env, "NACOS_ENABLED", "true");
-        addEnvIfAbsent(env, "NACOS_SERVER_ADDR", serverAddr);
+        // 平台托管的连接地址以当前配置为准：历史 Deployment 里残留的错误地址
+        // （如不存在的 nacos-svc）必须被覆盖，否则每次发布都原样保留。
+        setEnv(env, "NACOS_SERVER_ADDR", serverAddr);
         addEnvIfAbsent(env, "NACOS_NAMESPACE", namespace);
         addEnvIfAbsent(env, "NACOS_GROUP", group);
         addSecretEnvIfAbsent(env, "NACOS_USERNAME", "username");
@@ -876,7 +878,7 @@ public class DevOpsService {
         var nacos = template.getNacos();
         if (nacos != null && Boolean.TRUE.equals(nacos.getEnabled())) {
             addEnvIfAbsent(env, "NACOS_ENABLED", "true");
-            addEnvIfAbsent(env, "NACOS_SERVER_ADDR", nacos.getServerAddr());
+            setEnv(env, "NACOS_SERVER_ADDR", nacos.getServerAddr());
             addEnvIfAbsent(env, "NACOS_NAMESPACE", nacos.getNamespace());
             addEnvIfAbsent(env, "NACOS_GROUP", nacos.getGroup());
             addEnvIfAbsent(env, "NACOS_DATA_ID", nacos.getDataId());
@@ -913,6 +915,146 @@ public class DevOpsService {
         if (env.stream().noneMatch(item -> name.equals(item.getName()))) {
             env.add(new EnvVar(name, value, null));
         }
+    }
+
+    /** 写入或覆盖字面量环境变量；已有的 Secret 引用保持不动。 */
+    static void setEnv(List<EnvVar> env, String name, String value) {
+        for (EnvVar item : env) {
+            if (name.equals(item.getName())) {
+                if (item.getValueFrom() == null) {
+                    item.setValue(value);
+                }
+                return;
+            }
+        }
+        env.add(new EnvVar(name, value, null));
+    }
+
+    /**
+     * 更新 Deployment；resourceVersion 冲突（409）时重新读取并重放本次改动再试一次，
+     * 避免并发修改导致整次发布失败。
+     */
+    private void updateDeployment(KubernetesClient client, String namespace, Deployment deployment) {
+        String name = deployment.getMetadata().getName();
+        Container edited = deployment.getSpec().getTemplate().getSpec().getContainers().get(0);
+        boolean updated = updateDeploymentWithRetry(() ->
+                client.apps().deployments().inNamespace(namespace).resource(deployment).update());
+        if (updated) {
+            return;
+        }
+        Deployment latest = client.apps().deployments().inNamespace(namespace).withName(name).get();
+        if (latest == null) {
+            throw new KubernetesClientException("conflict", 409, null);
+        }
+        Container target = latest.getSpec().getTemplate().getSpec().getContainers().get(0);
+        target.setImage(edited.getImage());
+        target.setImagePullPolicy(edited.getImagePullPolicy());
+        target.setEnv(edited.getEnv());
+        if (!updateDeploymentWithRetry(() ->
+                client.apps().deployments().inNamespace(namespace).resource(latest).update())) {
+            throw new KubernetesClientException("conflict", 409, null);
+        }
+    }
+
+    /**
+     * 执行更新，遇 409 再试一次。两次都冲突返回 false，其它异常原样抛出。
+     * 重试前由调用方重读并重放改动，避免用过期的 resourceVersion 覆盖并发写入。
+     */
+    static boolean updateDeploymentWithRetry(Runnable update) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                update.run();
+                return true;
+            } catch (KubernetesClientException conflict) {
+                if (conflict.getCode() != 409 || attempt == 1) {
+                    if (conflict.getCode() == 409) {
+                        return false;
+                    }
+                    throw conflict;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 未就绪时的诊断摘要：新 Pod 容器的 waiting/terminated 原因，附最近事件。
+     * 事件取不到时只返回容器状态，保证超时日志至少带得出原因。
+     */
+    static String notReadyDiagnosis(List<Pod> pods, List<Event> events) {
+        StringBuilder summary = new StringBuilder();
+        if (pods != null) {
+            for (Pod pod : pods) {
+                if (pod.getStatus() == null || pod.getStatus().getContainerStatuses() == null) {
+                    continue;
+                }
+                for (ContainerStatus status : pod.getStatus().getContainerStatuses()) {
+                    String state = containerStateText(status.getState());
+                    if (state == null) {
+                        continue;
+                    }
+                    if (summary.length() > 0) {
+                        summary.append(" | ");
+                    }
+                    summary.append(pod.getMetadata().getName()).append("/").append(status.getName())
+                            .append(" ").append(state);
+                }
+            }
+        }
+        if (events != null && !events.isEmpty()) {
+            int start = Math.max(0, events.size() - 3);
+            for (int i = start; i < events.size(); i++) {
+                Event event = events.get(i);
+                if (summary.length() > 0) {
+                    summary.append(" | ");
+                }
+                summary.append(event.getReason()).append(": ").append(event.getMessage());
+            }
+        }
+        return summary.length() == 0 ? null : summary.toString();
+    }
+
+    /** 超时后把未就绪 Pod 的 waiting 原因和最近 Events 写入发布日志。 */
+    static void logNotReadyCause(KubernetesClient client, String namespace, Deployment deployment,
+            java.util.function.Consumer<String> log) {
+        try {
+            String selector = labelSelectorOf(deployment);
+            List<Pod> pods = selector == null ? List.of()
+                    : client.pods().inNamespace(namespace).withLabelSelector(selector).list().getItems();
+            List<Event> events = client.v1().events().inNamespace(namespace).list().getItems();
+            String diagnosis = notReadyDiagnosis(pods, events);
+            if (diagnosis != null) {
+                log.accept("[ERROR] 未就绪原因: " + diagnosis);
+            }
+        } catch (Exception e) {
+            log.accept("[WARN] 未就绪原因查询失败: " + e.getMessage());
+        }
+    }
+
+    private static String labelSelectorOf(Deployment deployment) {
+        if (deployment.getSpec() == null || deployment.getSpec().getSelector() == null
+                || deployment.getSpec().getSelector().getMatchLabels() == null
+                || deployment.getSpec().getSelector().getMatchLabels().isEmpty()) {
+            return null;
+        }
+        return deployment.getSpec().getSelector().getMatchLabels().entrySet().stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private static String containerStateText(ContainerState state) {
+        if (state == null) {
+            return null;
+        }
+        ContainerStateWaiting waiting = state.getWaiting();
+        if (waiting != null) {
+            return waiting.getReason() + (waiting.getMessage() != null ? ": " + waiting.getMessage() : "");
+        }
+        if (state.getTerminated() != null) {
+            String reason = state.getTerminated().getReason();
+            return "Terminated" + (reason != null ? ": " + reason : "");
+        }
+        return null;
     }
 
     static void addSecretEnvIfAbsent(List<EnvVar> env, String name, String key) {
@@ -958,6 +1100,9 @@ public class DevOpsService {
                         ? (fetchError != null ? "Deployment 查询失败: " + fetchError : "Deployment 不存在或已被删除")
                         : "副本 " + readyReplicasOf(current) + "/" + desiredReplicasOf(current) + " Ready 超时";
                 run.addLog("[ERROR] 副本未就绪: " + deployName + ", 原因: " + reason);
+                if (current != null) {
+                    logNotReadyCause(client, namespace, current, run::addLog);
+                }
                 broadcastLog(run);
                 return false;
             }

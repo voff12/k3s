@@ -1,7 +1,13 @@
 package com.example.k3sdemo.service;
 
+import io.fabric8.kubernetes.api.model.ContainerState;
+import io.fabric8.kubernetes.api.model.ContainerStateWaiting;
+import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
+import io.fabric8.kubernetes.api.model.Event;
+import io.fabric8.kubernetes.api.model.Pod;
+import io.fabric8.kubernetes.api.model.PodBuilder;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -88,6 +94,68 @@ class DevOpsDeploymentEnvironmentTest {
                 .contains("NACOS_ENABLED", "NACOS_SERVER_ADDR", "NACOS_DATA_ID");
         assertThat(container.getEnvFrom()).singleElement()
                 .extracting(e -> e.getConfigMapRef().getName()).isEqualTo("order-settings");
+    }
+
+    @Test
+    void managedNacosAddressReplacesStaleValue() {
+        List<EnvVar> env = new ArrayList<>();
+        env.add(new EnvVar("NACOS_SERVER_ADDR", "nacos-svc.default.svc.cluster.local:8848", null));
+        env.add(new EnvVar("DB_URL", "jdbc:mysql://rds/k3db", null));
+
+        DevOpsService.setEnv(env, "NACOS_SERVER_ADDR", "nacos.default.svc.cluster.local:8848");
+
+        assertThat(env).filteredOn(e -> "NACOS_SERVER_ADDR".equals(e.getName()))
+                .singleElement().extracting(EnvVar::getValue)
+                .isEqualTo("nacos.default.svc.cluster.local:8848");
+        assertThat(env).filteredOn(e -> "DB_URL".equals(e.getName()))
+                .singleElement().extracting(EnvVar::getValue).isEqualTo("jdbc:mysql://rds/k3db");
+    }
+
+    @Test
+    void notReadyDiagnosisNamesWaitingReasonAndEvents() {
+        Pod pod = new PodBuilder()
+                .withNewMetadata().withName("app-7f9c").endMetadata()
+                .withNewStatus()
+                .addNewContainerStatus()
+                .withName("app")
+                .withNewState()
+                .withNewWaiting().withReason("CrashLoopBackOff").withMessage("back-off restarting").endWaiting()
+                .endState()
+                .endContainerStatus()
+                .endStatus()
+                .build();
+        Event event = new Event();
+        event.setReason("Unhealthy");
+        event.setMessage("connect nacos-svc.default.svc.cluster.local:8848 refused");
+
+        String diagnosis = DevOpsService.notReadyDiagnosis(List.of(pod), List.of(event));
+
+        assertThat(diagnosis).contains("app-7f9c");
+        assertThat(diagnosis).contains("CrashLoopBackOff");
+        assertThat(diagnosis).contains("Unhealthy: connect nacos-svc.default.svc.cluster.local:8848 refused");
+    }
+
+    @Test
+    void deploymentUpdateRetriesOnceOnConflict() {
+        int[] attempts = {0};
+
+        boolean updated = DevOpsService.updateDeploymentWithRetry(() -> {
+            if (attempts[0]++ == 0) {
+                throw new io.fabric8.kubernetes.client.KubernetesClientException("conflict", 409, null);
+            }
+        });
+
+        assertThat(updated).isTrue();
+        assertThat(attempts[0]).isEqualTo(2);
+    }
+
+    @Test
+    void deploymentUpdateGivesUpAfterSecondConflict() {
+        boolean updated = DevOpsService.updateDeploymentWithRetry(() -> {
+            throw new io.fabric8.kubernetes.client.KubernetesClientException("conflict", 409, null);
+        });
+
+        assertThat(updated).isFalse();
     }
 
     @Test
