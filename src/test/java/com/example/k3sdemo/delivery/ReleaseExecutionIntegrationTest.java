@@ -44,6 +44,7 @@ class ReleaseExecutionIntegrationTest {
         volatile String lastGitUrl;
         volatile String lastBranch;
         volatile String lastImage;
+        volatile String lastRuntimeType;
         final ConcurrentLinkedQueue<String> ids = new ConcurrentLinkedQueue<>();
         volatile Map<String, Object> nextStatus = Map.of(
                 "status", "SUCCESS", "finished", true, "imageRef", "harbor.local/library/order-service:rel-1");
@@ -51,9 +52,18 @@ class ReleaseExecutionIntegrationTest {
         @Override
         public String trigger(String gitUrl, String branch, String imageName,
                               String deployment, String namespace) {
+            return trigger(gitUrl, branch, imageName, deployment, namespace, null, null);
+        }
+
+        @Override
+        public String trigger(String gitUrl, String branch, String imageName,
+                              String deployment, String namespace,
+                              com.example.k3sdemo.delivery.dto.DeploymentTemplate template,
+                              String runtimeType) {
             lastGitUrl = gitUrl;
             lastBranch = branch;
             lastImage = imageName;
+            lastRuntimeType = runtimeType;
             String id = "fake-" + ids.size();
             ids.add(id);
             return id;
@@ -90,12 +100,24 @@ class ReleaseExecutionIntegrationTest {
     private ReleaseStageRepository stageRepository;
 
     private Long newRelease(String env) {
+        return newRelease(env, "java");
+    }
+
+    private Long newRelease(String env, String runtimeType) {
         CreateApplicationRequest req = new CreateApplicationRequest();
         // 唯一仓库地址 → 唯一应用 code，避免无事务回滚时跨测试数据冲突
         req.setName("订单服务");
-        req.setRepoUrl("https://git.example.com/trade/order-service-" 
+        req.setRepoUrl("https://git.example.com/trade/order-service-"
                 + System.nanoTime() + ".git");
-        req.setRuntimeType("java");
+        req.setRuntimeType(runtimeType);
+        if ("frontend".equals(runtimeType)) {
+            // static 应用创建时强制要求 Ingress host（ApplicationService.validateStaticIngress）
+            com.example.k3sdemo.delivery.dto.DeploymentTemplate template =
+                    new com.example.k3sdemo.delivery.dto.DeploymentTemplate();
+            template.getIngress().setEnabled(true);
+            template.getIngress().setHost("order.example.com");
+            req.setDeploymentTemplate(template);
+        }
         Application app = applicationService.create(req);
 
         Artifact artifact = new Artifact();
@@ -167,6 +189,22 @@ class ReleaseExecutionIntegrationTest {
                 org.assertj.core.groups.Tuple.tuple("BETA", "SKIPPED"),
                 org.assertj.core.groups.Tuple.tuple("CANARY", "PASSED"),
                 org.assertj.core.groups.Tuple.tuple("STABLE", "PASSED"));
+    }
+
+    @Test
+    void execute_passesAppRuntimeTypeToTrigger() throws Exception {
+        fakeTrigger.nextStatus = Map.of("status", "SUCCESS", "finished", true);
+        Long id = newRelease("BETA", "frontend");
+
+        mockMvc.perform(post("/api/delivery/releases/{id}/execute", id))
+                .andExpect(status().isOk());
+
+        // Application.runtimeType=frontend 原样传给触发器（归一化在生产实现 BuildKitPipelineTrigger 内）
+        assertThat(fakeTrigger.lastRuntimeType).isEqualTo("frontend");
+        await().atMost(java.time.Duration.ofSeconds(10)).untilAsserted(() -> {
+            Release r = releaseRepository.findById(id).orElseThrow();
+            assertThat(r.getStatus()).isEqualTo("SUCCESS");
+        });
     }
 
     @Test

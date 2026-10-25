@@ -31,6 +31,14 @@ public class BuildKitPipelineTrigger implements PipelineTrigger {
     public String trigger(String gitUrl, String branch, String imageName,
                           String deployment, String namespace,
                           com.example.k3sdemo.delivery.dto.DeploymentTemplate template) {
+        return trigger(gitUrl, branch, imageName, deployment, namespace, template, null);
+    }
+
+    @Override
+    public String trigger(String gitUrl, String branch, String imageName,
+                          String deployment, String namespace,
+                          com.example.k3sdemo.delivery.dto.DeploymentTemplate template,
+                          String runtimeType) {
         PipelineConfig config = new PipelineConfig();
         config.setGitUrl(gitUrl);
         config.setBranch(branch != null && !branch.isBlank() ? branch : "main");
@@ -40,13 +48,26 @@ public class BuildKitPipelineTrigger implements PipelineTrigger {
         config.setDeliveryManaged(true);
         config.setDeploymentTemplate(template);
         config.setNamespace(namespace != null && !namespace.isBlank() ? namespace : "default");
-        config.setRuntime("auto");
+        config.setRuntime(normalizeRuntime(runtimeType));
         try {
             PipelineRun run = devOpsService.triggerPipeline(config);
             return run.getId();
         } catch (Exception e) {
             throw new TriggerException("触发流水线失败: " + e.getMessage(), e);
         }
+    }
+
+    /** Application.runtimeType → 流水线 runtime：docker→dockerfile，node/frontend/web→static，空/未知→auto（集群内探测）。 */
+    static String normalizeRuntime(String runtimeType) {
+        if (runtimeType == null || runtimeType.isBlank()) {
+            return "auto";
+        }
+        return switch (runtimeType.trim().toLowerCase()) {
+            case "java", "python", "static", "dockerfile" -> runtimeType.trim().toLowerCase();
+            case "docker" -> "dockerfile";
+            case "node", "frontend", "web" -> "static";
+            default -> "auto";
+        };
     }
 
     @Override

@@ -37,11 +37,11 @@ public class PipelineConfig {
     private int previewTtlMinutes = 120;
 
     // ===== 多语言运行时 (Runtime) =====
-    /** java / python / dockerfile / auto(默认)。 */
+    /** java / python / static / dockerfile / auto(默认)。 */
     private String runtime = "auto";
     /** Python 基础镜像版本 → python:<ver>-slim。 */
     private String pythonVersion = "3.11";
-    /** 应用监听端口;0 表示按 runtime 取默认(java=8080, python=8000)。 */
+    /** 应用监听端口;0 表示按 runtime 取默认(java=8080, python=8000, static=80)。 */
     private int appPort = 0;
     /** Python Web 服务器:gunicorn(WSGI)/ uvicorn(ASGI)。 */
     private String pythonServer = "gunicorn";
@@ -49,6 +49,12 @@ public class PipelineConfig {
     private String appModule = "app:app";
     /** 依赖清单路径。 */
     private String requirementsPath = "requirements.txt";
+    /** Node 构建镜像版本 → node:<ver>-alpine(runtime=static)。 */
+    private String nodeVersion = "20";
+    /** 前端构建命令(runtime=static),拼入 Dockerfile RUN,校验禁止换行。 */
+    private String npmBuildCommand = "npm run build";
+    /** 构建产物目录(runtime=static),如 dist / build。 */
+    private String staticDistDir = "dist";
     /** 是否安装 C 扩展编译链(build-essential gcc)。 */
     private boolean buildDeps = false;
     /** 可选,自定义启动命令(覆盖自动拼装,用于非 Web/worker 场景)。 */
@@ -340,14 +346,14 @@ public class PipelineConfig {
         this.startCommand = startCommand;
     }
 
-    /** 解析后的 runtime:显式值(java/python/dockerfile),否则 auto。 */
+    /** 解析后的 runtime:显式值(java/python/static/dockerfile),否则 auto。 */
     public String resolveRuntime() {
         if (runtime == null || runtime.isEmpty()) {
             return "auto";
         }
         String r = runtime.trim().toLowerCase();
         return switch (r) {
-            case "java", "python", "dockerfile" -> r;
+            case "java", "python", "static", "dockerfile" -> r;
             default -> "auto";
         };
     }
@@ -356,12 +362,26 @@ public class PipelineConfig {
         return "python".equals(resolveRuntime());
     }
 
-    /** 生效端口:appPort>0 用之;否则 python=8000,其它=8080。 */
+    public boolean isStatic() {
+        return "static".equals(resolveRuntime());
+    }
+
+    public String getNodeVersion() { return nodeVersion; }
+    public void setNodeVersion(String nodeVersion) { this.nodeVersion = nodeVersion; }
+    public String getNpmBuildCommand() { return npmBuildCommand; }
+    public void setNpmBuildCommand(String npmBuildCommand) { this.npmBuildCommand = npmBuildCommand; }
+    public String getStaticDistDir() { return staticDistDir; }
+    public void setStaticDistDir(String staticDistDir) { this.staticDistDir = staticDistDir; }
+
+    /** 生效端口:appPort>0 用之;否则 python=8000 / static=80 / 其它=8080。 */
     public int getEffectiveAppPort() {
         if (appPort > 0) {
             return appPort;
         }
-        return isPython() ? 8000 : 8080;
+        if (isPython()) {
+            return 8000;
+        }
+        return isStatic() ? 80 : 8080;
     }
 
     /**
@@ -369,6 +389,6 @@ public class PipelineConfig {
      */
     public String validateRuntimeFields() {
         return RuntimeValidation.validate(runtime, pythonVersion, appPort, pythonServer,
-                appModule, requirementsPath);
+                appModule, requirementsPath, nodeVersion, npmBuildCommand, staticDistDir);
     }
 }

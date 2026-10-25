@@ -29,6 +29,17 @@ public interface PipelineTrigger {
     }
 
     /**
+     * 触发一次构建部署（带运行时）。runtimeType 来自 Application.runtimeType（已归一化：
+     * java/python/static/dockerfile/auto），实现方直接透传给流水线。
+     */
+    default String trigger(String gitUrl, String branch, String imageName,
+                         String deployment, String namespace,
+                         com.example.k3sdemo.delivery.dto.DeploymentTemplate template,
+                         String runtimeType) {
+        return trigger(gitUrl, branch, imageName, deployment, namespace, template);
+    }
+
+    /**
      * 查询流水线当前状态。
      *
      * @return 至少包含：status（PENDING/CLONING/MERGING/BUILDING/PUSHING/DEPLOYING/SUCCESS/FAILED）、

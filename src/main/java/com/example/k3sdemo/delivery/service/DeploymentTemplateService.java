@@ -57,7 +57,15 @@ public class DeploymentTemplateService {
 
     private DeploymentTemplate read(String json, String source) {
         try {
-            return json == null || json.isBlank() ? new DeploymentTemplate() : objectMapper.readValue(json, DeploymentTemplate.class);
+            if (json == null || json.isBlank()) {
+                return new DeploymentTemplate();
+            }
+            String text = json.trim();
+            // H2 等 JSON 列经 JDBC 读回时会把对象包成带引号的字符串标量,解包后再解析
+            if (text.startsWith("\"")) {
+                text = objectMapper.readValue(text, String.class).trim();
+            }
+            return objectMapper.readValue(text, DeploymentTemplate.class);
         } catch (Exception e) {
             throw new IllegalStateException(source + "无法解析", e);
         }

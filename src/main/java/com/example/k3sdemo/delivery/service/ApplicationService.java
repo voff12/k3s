@@ -58,6 +58,7 @@ public class ApplicationService {
     @Transactional
     public Application create(CreateApplicationRequest req) {
         validate(req);
+        validateStaticIngress(req);
         String code = resolveCode(req);
         List<String> environments = normalizeEnvironments(req.getEnvironments());
         if (applicationRepository.findByCode(code).isPresent()) {
@@ -144,6 +145,33 @@ public class ApplicationService {
         }
         if (req.getRepoUrl() == null || req.getRepoUrl().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "代码仓库地址不能为空");
+        }
+    }
+
+    /**
+     * 前端静态应用必须有对外入口（设计 4.1）：runtimeType 归一化为 static 时，
+     * 部署模板须启用 Ingress 且配置访问域名 host，否则创建即拒绝。
+     */
+    private void validateStaticIngress(CreateApplicationRequest req) {
+        if (req.getRuntimeType() == null) {
+            return;
+        }
+        String rt = req.getRuntimeType().trim().toLowerCase(Locale.ROOT);
+        boolean staticApp = switch (rt) {
+            case "static", "node", "frontend", "web" -> true;
+            default -> false;
+        };
+        if (!staticApp) {
+            return;
+        }
+        com.example.k3sdemo.delivery.dto.DeploymentTemplate template = req.getDeploymentTemplate();
+        boolean ingressReady = template != null && template.getIngress() != null
+                && Boolean.TRUE.equals(template.getIngress().getEnabled())
+                && template.getIngress().getHost() != null
+                && !template.getIngress().getHost().isBlank();
+        if (!ingressReady) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "前端静态应用必须启用 Ingress 并配置访问域名(host)");
         }
     }
 

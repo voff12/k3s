@@ -11,16 +11,19 @@ final class RuntimeValidation {
 
     /**
      * 校验运行时字段。合法返回 null,否则返回错误信息。
-     * 仅在 runtime=python 时严格校验 Python 专属字段。
+     * 仅在 runtime=python 时严格校验 Python 专属字段;runtime=static 时校验 Node 专属字段。
      */
     static String validate(String runtime, String pythonVersion, int appPort,
-            String pythonServer, String appModule, String requirementsPath) {
+            String pythonServer, String appModule, String requirementsPath,
+            String nodeVersion, String npmBuildCommand, String staticDistDir) {
         String r = runtime == null ? "" : runtime.trim().toLowerCase();
         boolean isPython = "python".equals(r);
+        boolean isStatic = "static".equals(r);
 
         // runtime 取值
         if (!r.isEmpty() && !r.equals("auto")
-                && !r.equals("java") && !r.equals("python") && !r.equals("dockerfile")) {
+                && !r.equals("java") && !r.equals("python") && !r.equals("static")
+                && !r.equals("dockerfile")) {
             return "非法 runtime: " + runtime;
         }
 
@@ -45,6 +48,20 @@ final class RuntimeValidation {
             if (requirementsPath != null && !requirementsPath.isEmpty()
                     && (requirementsPath.startsWith("/") || requirementsPath.contains(".."))) {
                 return "非法 requirementsPath(禁止绝对路径与 ..): " + requirementsPath;
+            }
+        }
+        if (isStatic) {
+            if (nodeVersion != null && !nodeVersion.isEmpty()
+                    && !nodeVersion.matches("[0-9.]+")) {
+                return "非法 nodeVersion: " + nodeVersion;
+            }
+            // 与 buildCommand 同类:允许自由命令文本,仅禁止换行破坏生成 Dockerfile
+            if (npmBuildCommand != null && npmBuildCommand.contains("\n")) {
+                return "非法 npmBuildCommand(禁止换行): " + npmBuildCommand;
+            }
+            if (staticDistDir != null && !staticDistDir.isEmpty()
+                    && (staticDistDir.startsWith("/") || staticDistDir.contains(".."))) {
+                return "非法 staticDistDir(禁止绝对路径与 ..): " + staticDistDir;
             }
         }
         return null;

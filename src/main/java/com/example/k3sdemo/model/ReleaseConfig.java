@@ -319,7 +319,8 @@ public class ReleaseConfig {
     }
 
     public String validateRuntimeFields() {
+        // 老发布表单无 static 专属字段,三参传 null(static 仅流水线表单/交付中心使用)
         return RuntimeValidation.validate(runtime, pythonVersion, appPort, pythonServer,
-                appModule, requirementsPath);
+                appModule, requirementsPath, null, null, null);
     }
 }

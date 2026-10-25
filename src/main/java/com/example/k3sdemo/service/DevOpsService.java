@@ -1368,6 +1368,52 @@ public class DevOpsService {
         return df.toString();
     }
 
+    /** static 构建 context 排除项: 避免 COPY . . 带入宿主 node_modules/dist 覆盖构建产物。 */
+    private static final String STATIC_DOCKERIGNORE =
+            ".git\nnode_modules/\ndist/\nbuild/\n.env\n.local\n";
+
+    /**
+     * runtime=static: 前端静态站两阶段 Dockerfile(node 构建 + nginx 托管)。
+     * 产物目录由 staticDistDir 决定(默认 dist);监听端口 = getEffectiveAppPort()(默认 80)。
+     */
+    static String buildStaticDockerfile(String fromPrefix, PipelineConfig config) {
+        String nodeVer = (config.getNodeVersion() != null && !config.getNodeVersion().isEmpty())
+                ? config.getNodeVersion() : "20";
+        String distDir = (config.getStaticDistDir() != null && !config.getStaticDistDir().isEmpty())
+                ? config.getStaticDistDir() : "dist";
+        String buildCmd = (config.getNpmBuildCommand() != null && !config.getNpmBuildCommand().isEmpty())
+                ? config.getNpmBuildCommand().trim() : "npm run build";
+        int port = config.getEffectiveAppPort();
+        StringBuilder df = new StringBuilder();
+        // 阶段 1: node 构建(依赖清单单独 COPY, 利用 BuildKit 层缓存)
+        df.append("FROM ").append(fromPrefix).append("/library/node:").append(nodeVer).append("-alpine AS build\n");
+        df.append("WORKDIR /app\n");
+        df.append("COPY package*.json ./\n");
+        df.append("RUN if [ -f package-lock.json ]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi\n");
+        df.append("COPY . .\n");
+        df.append("RUN ").append(buildCmd).append("\n");
+        // 阶段 2: nginx 托管静态产物
+        df.append("FROM ").append(fromPrefix).append("/library/nginx:alpine\n");
+        df.append("COPY --from=build /app/").append(distDir).append(" /usr/share/nginx/html\n");
+        df.append("COPY nginx-static.conf /etc/nginx/conf.d/default.conf\n");
+        df.append("EXPOSE ").append(port).append("\n");
+        df.append("CMD [\"nginx\", \"-g\", \"daemon off;\"]\n");
+        return df.toString();
+    }
+
+    /** static 运行时 nginx 站点配置: SPA 路由回退到 index.html, 避免前端路由刷新 404。 */
+    static String buildStaticNginxConf(int port) {
+        return "server {\n"
+                + "    listen " + port + ";\n"
+                + "    server_name _;\n"
+                + "    root /usr/share/nginx/html;\n"
+                + "    index index.html;\n"
+                + "    location / {\n"
+                + "        try_files $uri $uri/ /index.html;\n"
+                + "    }\n"
+                + "}\n";
+    }
+
     /**
      * Build the BuildKit Job spec.
      * Init containers: registry-check → git-clone → rewrite-dockerfile → buildkit
@@ -1506,9 +1552,12 @@ public class DevOpsService {
         String reqPath = (config.getRequirementsPath() != null && !config.getRequirementsPath().isEmpty())
                 ? config.getRequirementsPath() : "requirements.txt";
 
-        // 生成 java / python Dockerfile 内容并 base64 编码(避免 shell 转义),容器按 runtime 写入
+        // 生成 java / python / static Dockerfile 内容并 base64 编码(避免 shell 转义),容器按 runtime 写入
         String javaDfB64 = b64(buildJavaDockerfile(localRegistry, buildCmd));
         String pyDfB64 = b64(buildPythonDockerfile(localRegistry, config));
+        String staticDfB64 = b64(buildStaticDockerfile(localRegistry, config));
+        String nginxConfB64 = b64(buildStaticNginxConf(config.getEffectiveAppPort()));
+        String staticIgnoreB64 = b64(STATIC_DOCKERIGNORE);
         String dockerIgnoreB64 = b64(PY_DOCKERIGNORE);
 
         String rewriteCmd =
@@ -1523,16 +1572,20 @@ public class DevOpsService {
                         "  echo '[INFO] 重写后 Dockerfile:' && cat \"$DF\"; " +
                         "else " +
                         "  if [ \"$RUNTIME\" = 'auto' ] || [ -z \"$RUNTIME\" ]; then " +
-                        "    HAS_PY=0; HAS_JAVA=0; " +
+                        "    HAS_PY=0; HAS_JAVA=0; HAS_NPM=0; " +
                         "    if [ -f \"/workspace/$REQ_PATH\" ] || [ -f /workspace/requirements.txt ]; then HAS_PY=1; fi; " +
                         "    if [ -f /workspace/pom.xml ] || [ -f /workspace/build.gradle ]; then HAS_JAVA=1; fi; " +
+                        "    if [ -f /workspace/package.json ]; then HAS_NPM=1; fi; " +
                         "    if [ \"$HAS_PY\" = 1 ] && [ \"$HAS_JAVA\" = 1 ]; then " +
                         "      echo '[ERROR] 同时检测到 Java(pom.xml/build.gradle) 与 Python(requirements.txt) 构建文件, 无法自动判定语言; 请在表单显式选择 runtime=java 或 python(避免 Python/Java 流水线混淆)' && exit 1; " +
+                        "    elif [ \"$HAS_PY\" = 1 ] && [ \"$HAS_NPM\" = 1 ]; then " +
+                        "      echo '[ERROR] 同时检测到 Python(requirements.txt) 与 前端(package.json) 构建文件, 请显式指定 runtime=python 或 static' && exit 1; " +
                         "    elif [ \"$HAS_PY\" = 1 ]; then RUNTIME=python; " +
                         "    elif [ \"$HAS_JAVA\" = 1 ]; then RUNTIME=java; " +
+                        "    elif [ \"$HAS_NPM\" = 1 ]; then RUNTIME=static; " +
                         "    elif [ -f /workspace/pyproject.toml ] || [ -f /workspace/Pipfile ]; then " +
                         "      echo '[ERROR] 检测到 pyproject/Pipfile 但缺少 requirements.txt; 本期未支持 Poetry/Pipenv, 请先 poetry export -f requirements.txt -o requirements.txt 或自带 Dockerfile' && exit 1; " +
-                        "    else echo '[ERROR] 无法识别项目类型, 请显式指定 runtime(java/python) 或自带 Dockerfile' && exit 1; fi; " +
+                        "    else echo '[ERROR] 无法识别项目类型, 请显式指定 runtime(java/python/static) 或自带 Dockerfile' && exit 1; fi; " +
                         "  fi; " +
                         "  if [ \"$RUNTIME\" = 'dockerfile' ]; then echo '[ERROR] runtime=dockerfile 但仓库未发现 Dockerfile' && exit 1; fi; " +
                         "  echo \"[INFO] 构建运行时: $RUNTIME\"; " +
@@ -1541,6 +1594,11 @@ public class DevOpsService {
                         "    echo '" + pyDfB64 + "' | base64 -d > \"$DF\" && " +
                         "    echo '" + dockerIgnoreB64 + "' | base64 -d > /workspace/.dockerignore && " +
                         "    echo '[INFO] ✓ 已生成 Python Dockerfile:' && cat \"$DF\"; " +
+                        "  elif [ \"$RUNTIME\" = 'static' ]; then " +
+                        "    echo '" + staticDfB64 + "' | base64 -d > \"$DF\" && " +
+                        "    echo '" + nginxConfB64 + "' | base64 -d > /workspace/nginx-static.conf && " +
+                        "    echo '" + staticIgnoreB64 + "' | base64 -d > /workspace/.dockerignore && " +
+                        "    echo '[INFO] ✓ 已生成前端静态 Dockerfile(node 构建 + nginx 托管):' && cat \"$DF\"; " +
                         "  else " +
                         "    echo '[INFO] ✓ 生成 Java 多阶段 Dockerfile (Maven 打包 + 镜像构建)' && " +
                         "    echo '" + javaDfB64 + "' | base64 -d > \"$DF\" && cat \"$DF\"; " +

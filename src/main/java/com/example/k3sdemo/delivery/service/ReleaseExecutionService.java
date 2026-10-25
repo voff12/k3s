@@ -149,18 +149,21 @@ public class ReleaseExecutionService {
         Artifact artifact = artifactRepository.findById(release.getArtifactId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "制品不存在: " + release.getArtifactId()));
+        Application app = applicationRepository.findById(release.getAppId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "应用不存在: " + release.getAppId()));
         // 应用信息从制品仓库名推导镜像名（Harbor project/app 形式）
         String imageName = artifact.getImageRepo();
         String deployment = "app-" + release.getAppId();
         String namespace = "default";
-        com.example.k3sdemo.delivery.dto.DeploymentTemplate template = applicationRepository.findById(release.getAppId())
-                .map(app -> deploymentTemplateService.resolve(app, release.getEnv()))
-                .orElseGet(com.example.k3sdemo.delivery.dto.DeploymentTemplate::new);
+        com.example.k3sdemo.delivery.dto.DeploymentTemplate template =
+                deploymentTemplateService.resolve(app, release.getEnv());
 
         String pipelineId;
         try {
             pipelineId = pipelineTrigger.trigger(gitUrlFor(release),
-                    branchFor(artifact), imageName, deployment, namespace, template);
+                    branchFor(artifact), imageName, deployment, namespace, template,
+                    app.getRuntimeType());
         } catch (PipelineTrigger.TriggerException e) {
             activityLog.log(release.getAppId(), releaseId, "SYSTEM", null,
                     "EXECUTE_FAILED", "触发流水线失败: " + e.getMessage(), release.getEnv());
